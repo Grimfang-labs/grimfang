@@ -37,6 +37,12 @@ struct Result {
     std::uint64_t nodes    = 0;
 };
 
+// Iterative-deepening driver. Emits a UCI `info` line per completed iteration
+// and prints `bestmove <move>` exactly once when it returns. `stop` aborts the
+// search asynchronously; the best move from the last completed iteration is
+// kept.
+Result search(Position& pos, const Limits& limits, std::atomic<bool>& stop);
+
 // Fixed-depth search with no time management and no info output (used by tests
 // and as the building block for iterative deepening). `stop` aborts cleanly.
 Result search_fixed(Position& pos, int depth, std::atomic<bool>& stop);
