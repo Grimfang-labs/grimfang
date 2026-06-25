@@ -50,4 +50,14 @@ Result search_fixed(Position& pos, int depth, std::atomic<bool>& stop);
 // Convenience overload for callers that never abort (tests).
 Result search_fixed(Position& pos, int depth);
 
+// Default depth for `bench` (chosen to run in a few seconds single-threaded).
+// Signature at this depth: 14717091 nodes.
+constexpr int BENCH_DEFAULT_DEPTH = 6;
+
+// Search a fixed list of positions to a fixed depth with time management
+// disabled, printing an OpenBench-compatible summary. The total node count is
+// deterministic and serves as the search regression signature. Returns the
+// total nodes searched.
+std::uint64_t bench(int depth = BENCH_DEFAULT_DEPTH);
+
 } // namespace Search

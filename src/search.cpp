@@ -311,3 +311,62 @@ Search::Result Search::search_fixed(Position& pos, int depth) {
     std::atomic<bool> never{ false };
     return search_fixed(pos, depth, never);
 }
+
+namespace {
+
+// Fixed, reproducible bench set: the Stage 1 perft positions plus a handful of
+// representative middlegame / endgame positions.
+const char* const kBenchFens[] = {
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+    "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+    "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+    "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+    "rnbqkb1r/pp1p1ppp/2p5/4P3/2B5/8/PPP1NnPP/RNBQK2R w KQkq - 0 6",
+    "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+    "r1bqk2r/ppp2ppp/2n2n2/2bpp3/4P3/2NP1N2/PPP2PPP/R1BQKB1R w KQkq - 0 5",
+    "2rq1rk1/pp1bppbp/2np1np1/8/3NP3/2N1BP2/PPPQ2PP/2KR1B1R w - - 0 10",
+    "8/8/4k3/8/8/4K3/4P3/8 w - - 0 1",
+    "8/8/8/2k5/2pP4/8/B7/4K3 b - d3 0 1",
+    "8/pp3p1k/2p2q1p/3r1P2/5R2/7P/P1P1QP2/7K b - - 2 30",
+    "r3r1k1/ppqb1ppp/8/4p1NQ/8/2P5/PP3PPP/R3R1K1 b - - 0 1",
+    "4rrk1/pp1n3p/3q2pQ/2p1pb2/2PP4/2P3N1/P2B2PP/4RRK1 b - - 7 19",
+    "8/8/1P6/5pr1/8/4R3/7k/2K5 w - - 0 1",
+};
+
+} // namespace
+
+std::uint64_t Search::bench(int depth) {
+    std::atomic<bool> never{ false };
+    std::uint64_t     totalNodes = 0;
+
+    const auto start = Clock::now();
+    int idx = 0;
+    for (const char* fen : kBenchFens) {
+        Position pos;
+        pos.set_fen(fen);
+
+        Searcher s(never);
+        Limits   limits;
+        limits.depth = depth;
+        const Result r = s.iterate(pos, limits, /*printInfo=*/false);
+
+        totalNodes += s.nodes();
+        std::cout << "position " << ++idx << " depth " << depth
+                  << " score " << static_cast<int>(r.score)
+                  << " nodes " << s.nodes() << std::endl;
+    }
+
+    const std::int64_t ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start).count();
+    const std::uint64_t nps =
+        (ms > 0) ? (totalNodes * 1000ULL) / static_cast<std::uint64_t>(ms) : totalNodes * 1000ULL;
+
+    std::cout << "===========================\n";
+    std::cout << "Total time (ms) : " << ms << '\n';
+    std::cout << "Nodes searched  : " << totalNodes << '\n';
+    std::cout << "Nodes/second    : " << nps << std::endl;
+
+    return totalNodes;
+}

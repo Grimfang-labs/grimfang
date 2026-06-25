@@ -172,6 +172,12 @@ void UciLoop::run() {
             ensure_idle();
             int d = 0;
             if (ss >> d) perft_divide(pos_, d);
+        } else if (token == "bench") {
+            ensure_idle();
+            int d = Search::BENCH_DEFAULT_DEPTH;
+            int override = 0;
+            if (ss >> override) d = override;   // optional depth override
+            Search::bench(d);
         } else if (token == "eval") {
             ensure_idle();
             std::cout << "eval " << Eval::evaluate(pos_) << " (cp, side to move)" << std::endl;

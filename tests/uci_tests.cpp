@@ -119,3 +119,29 @@ TEST_CASE("uci: stop during go infinite returns a bestmove", "[uci]") {
     REQUIRE(contains(out, "bestmove "));
     REQUIRE(bestmove_of(out) != "0000");
 }
+
+namespace {
+// Extract the "Nodes searched  : N" value from bench output, or "" if absent.
+std::string nodes_searched_of(const std::string& out) {
+    const auto pos = out.find("Nodes searched");
+    if (pos == std::string::npos) return "";
+    const auto colon = out.find(':', pos);
+    if (colon == std::string::npos) return "";
+    std::istringstream ss(out.substr(colon + 1));
+    std::string n;
+    ss >> n;
+    return n;
+}
+} // namespace
+
+TEST_CASE("uci: bench is deterministic and reproducible", "[uci][bench]") {
+    // A shallow depth keeps the test fast; reproducibility holds at any depth.
+    const std::string a = run_engine("bench 4\nquit\n");
+    const std::string b = run_engine("bench 4\nquit\n");
+
+    const std::string na = nodes_searched_of(a);
+    const std::string nb = nodes_searched_of(b);
+
+    REQUIRE_FALSE(na.empty());
+    REQUIRE(na == nb);
+}
