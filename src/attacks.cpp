@@ -1,6 +1,11 @@
 #include "attacks.hpp"
 
 #include <cassert>
+#include <cstdlib>
+
+#if defined(USE_PEXT)
+  #include <immintrin.h>
+#endif
 
 // ===========================================================================
 // attacks.cpp
@@ -108,13 +113,178 @@ Bitboard pawn_attacks_bb(Color c, Bitboard pawns) {
 Bitboard bishop_attacks_slow(Square s, Bitboard occ) { return slow_slider(s, BishopDirs, occ); }
 Bitboard rook_attacks_slow(Square s, Bitboard occ)   { return slow_slider(s, RookDirs, occ); }
 
+// ===========================================================================
+// Pass B - fancy magic bitboards.
+//
+// Per square we store a relevant-occupancy mask, a magic multiplier, a shift,
+// and a pointer into a shared backing array. The index is
+//   ((occ & mask) * magic) >> shift
+// (or a BMI2 PEXT extraction when USE_PEXT is defined). Magics are searched at
+// init with a fixed-seed PRNG, so builds are reproducible, and the resulting
+// tables are verified against the slow reference for every blocker subset.
+// ===========================================================================
+namespace {
+
+struct Magic {
+    Bitboard  mask;
+    Bitboard  magic;
+    Bitboard* attacks;
+    unsigned  shift;
+};
+
+Magic RookMagics[SQ_NB];
+Magic BishopMagics[SQ_NB];
+
+// Standard fancy-magic backing-array sizes (sum of 1 << relevant_bits).
+Bitboard RookTable[102400];
+Bitboard BishopTable[5248];
+
+// Relevant occupancy mask: slider rays excluding the board-edge squares (a
+// blocker on the far edge never changes which squares are attacked).
+Bitboard rook_mask(Square s) {
+    Bitboard m = 0;
+    const int f = file_of(s), r = rank_of(s);
+    for (int rr = r + 1; rr <= 6; ++rr) m |= square_bb(make_square(static_cast<File>(f), static_cast<Rank>(rr)));
+    for (int rr = r - 1; rr >= 1; --rr) m |= square_bb(make_square(static_cast<File>(f), static_cast<Rank>(rr)));
+    for (int ff = f + 1; ff <= 6; ++ff) m |= square_bb(make_square(static_cast<File>(ff), static_cast<Rank>(r)));
+    for (int ff = f - 1; ff >= 1; --ff) m |= square_bb(make_square(static_cast<File>(ff), static_cast<Rank>(r)));
+    return m;
+}
+
+Bitboard bishop_mask(Square s) {
+    Bitboard m = 0;
+    const int f = file_of(s), r = rank_of(s);
+    for (int ff = f + 1, rr = r + 1; ff <= 6 && rr <= 6; ++ff, ++rr) m |= square_bb(make_square(static_cast<File>(ff), static_cast<Rank>(rr)));
+    for (int ff = f + 1, rr = r - 1; ff <= 6 && rr >= 1; ++ff, --rr) m |= square_bb(make_square(static_cast<File>(ff), static_cast<Rank>(rr)));
+    for (int ff = f - 1, rr = r + 1; ff >= 1 && rr <= 6; --ff, ++rr) m |= square_bb(make_square(static_cast<File>(ff), static_cast<Rank>(rr)));
+    for (int ff = f - 1, rr = r - 1; ff >= 1 && rr >= 1; --ff, --rr) m |= square_bb(make_square(static_cast<File>(ff), static_cast<Rank>(rr)));
+    return m;
+}
+
+inline unsigned magic_index(const Magic& m, Bitboard occ) {
+#if defined(USE_PEXT)
+    return static_cast<unsigned>(_pext_u64(occ, m.mask));
+#else
+    return static_cast<unsigned>(((occ & m.mask) * m.magic) >> m.shift);
+#endif
+}
+
+// Deterministic sparse-bit PRNG used for the magic search.
+class MagicRng {
+public:
+    explicit MagicRng(std::uint64_t seed) : s_(seed) {}
+    std::uint64_t next() {
+        s_ ^= s_ >> 12; s_ ^= s_ << 25; s_ ^= s_ >> 27;
+        return s_ * 0x2545F4914F6CDD1DULL;
+    }
+    std::uint64_t sparse() { return next() & next() & next(); }
+private:
+    std::uint64_t s_;
+};
+
+// Populate magics + backing slices for one slider kind.
+void init_magic_kind(bool bishop, Magic magics[], Bitboard table[]) {
+    Bitboard occ[4096];
+    Bitboard ref[4096];
+#if !defined(USE_PEXT)
+    MagicRng rng(0xDEADBEEFCAFEF00DULL ^ (bishop ? 0x1ULL : 0x2ULL));
+    unsigned epoch[4096] = {};
+    unsigned gen = 0;
+#endif
+
+    int offset = 0;
+    for (int sq = A1; sq <= H8; ++sq) {
+        const Square s    = static_cast<Square>(sq);
+        const Bitboard mask = bishop ? bishop_mask(s) : rook_mask(s);
+        const int    bits = popcount(mask);
+        const int    size = 1 << bits;
+
+        Magic& m = magics[sq];
+        m.mask    = mask;
+        m.shift   = static_cast<unsigned>(64 - bits);
+        m.attacks = table + offset;
+        offset += size;
+
+        // Enumerate every blocker subset of the mask (carry-rippler) and its
+        // reference attack set.
+        int n = 0;
+        Bitboard b = 0;
+        do {
+            occ[n] = b;
+            ref[n] = bishop ? bishop_attacks_slow(s, b) : rook_attacks_slow(s, b);
+            ++n;
+            b = (b - mask) & mask;
+        } while (b);
+
+#if defined(USE_PEXT)
+        // PEXT needs no magic; fill directly.
+        m.magic = 0;
+        for (int i = 0; i < n; ++i)
+            m.attacks[magic_index(m, occ[i])] = ref[i];
+#else
+        // Search for a collision-free (or constructively consistent) magic.
+        while (true) {
+            const Bitboard magic = rng.sparse();
+            if (popcount((mask * magic) >> 56) < 6)
+                continue;   // cheap quality filter
+
+            m.magic = magic;
+            ++gen;
+            bool ok = true;
+            for (int i = 0; i < n; ++i) {
+                const unsigned idx = magic_index(m, occ[i]);
+                if (epoch[idx] != gen) {
+                    epoch[idx]      = gen;
+                    m.attacks[idx]  = ref[i];
+                } else if (m.attacks[idx] != ref[i]) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok)
+                break;
+        }
+#endif
+    }
+}
+
+// Verify magic results against the slow reference for every blocker subset.
+void verify_magics() {
+    for (int sq = A1; sq <= H8; ++sq) {
+        const Square s = static_cast<Square>(sq);
+
+        for (bool bishop : { false, true }) {
+            const Bitboard mask = bishop ? BishopMagics[sq].mask : RookMagics[sq].mask;
+            Bitboard b = 0;
+            do {
+                const Bitboard fast = bishop ? BishopMagics[sq].attacks[magic_index(BishopMagics[sq], b)]
+                                             : RookMagics[sq].attacks[magic_index(RookMagics[sq], b)];
+                const Bitboard slow = bishop ? bishop_attacks_slow(s, b)
+                                             : rook_attacks_slow(s, b);
+                if (fast != slow)
+                    std::abort();   // magic table is wrong - fail the build/run loudly
+                b = (b - mask) & mask;
+            } while (b);
+        }
+    }
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
-// Public fast surface (sub-step 1: routed to the slow reference; replaced by
-// magic bitboards in sub-step 4 with identical results).
+// Public fast surface (magic bitboards; identical results to the slow ref).
 // ---------------------------------------------------------------------------
-Bitboard bishop_attacks(Square s, Bitboard occ) { return bishop_attacks_slow(s, occ); }
-Bitboard rook_attacks(Square s, Bitboard occ)   { return rook_attacks_slow(s, occ); }
-Bitboard queen_attacks(Square s, Bitboard occ)  { return bishop_attacks(s, occ) | rook_attacks(s, occ); }
+Bitboard bishop_attacks(Square s, Bitboard occ) {
+    const Magic& m = BishopMagics[s];
+    return m.attacks[magic_index(m, occ)];
+}
+Bitboard rook_attacks(Square s, Bitboard occ) {
+    const Magic& m = RookMagics[s];
+    return m.attacks[magic_index(m, occ)];
+}
+Bitboard queen_attacks(Square s, Bitboard occ) {
+    return bishop_attacks(s, occ) | rook_attacks(s, occ);
+}
 
 Bitboard attacks_bb(PieceType pt, Square s, Bitboard occ) {
     switch (pt) {
@@ -131,7 +301,9 @@ namespace Attacks {
 
 void init() {
     init_leapers();
-    // Magic bitboard initialisation is added in sub-step 4.
+    init_magic_kind(/*bishop=*/false, RookMagics, RookTable);
+    init_magic_kind(/*bishop=*/true,  BishopMagics, BishopTable);
+    verify_magics();
 }
 
 } // namespace Attacks

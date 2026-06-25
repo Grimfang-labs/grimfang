@@ -71,6 +71,24 @@ TEST_CASE("geometry tables", "[bitboard]") {
     REQUIRE_FALSE(aligned(A1, D4, H7));
 }
 
+TEST_CASE("magic sliders equal the slow reference", "[attacks][magic]") {
+    Key seed = 0x1234567ULL;
+    auto rng = [&seed]() {
+        seed ^= seed >> 12; seed ^= seed << 25; seed ^= seed >> 27;
+        return seed * 0x2545F4914F6CDD1DULL;
+    };
+    for (int sq = A1; sq <= H8; ++sq) {
+        const Square s = static_cast<Square>(sq);
+        for (int t = 0; t < 64; ++t) {
+            const Bitboard occ = rng() & rng();   // sparse-ish occupancy
+            REQUIRE(bishop_attacks(s, occ) == bishop_attacks_slow(s, occ));
+            REQUIRE(rook_attacks(s, occ)   == rook_attacks_slow(s, occ));
+            REQUIRE(queen_attacks(s, occ)  ==
+                    (bishop_attacks_slow(s, occ) | rook_attacks_slow(s, occ)));
+        }
+    }
+}
+
 TEST_CASE("FEN round-trips", "[fen]") {
     for (const auto& fen : kStandardFens) {
         Position pos;
