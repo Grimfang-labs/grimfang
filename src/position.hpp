@@ -67,6 +67,12 @@ public:
 
     bool can_castle(CastlingRights cr) const { return (castling_ & cr) != 0; }
 
+    // -- Draw detection ----------------------------------------------------
+    // Fifty-move rule OR repetition over the retained key history. A single
+    // earlier occurrence within the irreversible window counts (the standard
+    // "twofold within the search tree" shortcut).
+    bool is_draw() const;
+
     // -- Attack / legality queries ----------------------------------------
     // All pieces (either color) attacking `s` given occupancy `occ`.
     Bitboard attackers_to(Square s, Bitboard occ) const;
@@ -95,6 +101,10 @@ private:
     void remove_piece(Square s);
     void move_piece(Square from, Square to);
 
+    // True when an enemy pawn of `stm` can actually capture en passant on `ep`
+    // (used to gate the Zobrist ep component for exact key equality).
+    bool ep_capturable(Square ep, Color stm) const;
+
     Bitboard byColor_[COLOR_NB];
     Bitboard byType_[PIECE_TYPE_NB];
     Piece    board_[SQ_NB];
@@ -107,4 +117,9 @@ private:
     Key            key_;
 
     std::vector<StateInfo> states_;
+
+    // Zobrist keys of every position reached since game setup (back() == key_).
+    // Seeded by set_fen and grown/shrunk by make/unmake so repetition detection
+    // also sees positions that preceded the search.
+    std::vector<Key> keyHistory_;
 };

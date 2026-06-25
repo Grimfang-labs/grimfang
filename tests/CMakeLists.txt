@@ -9,7 +9,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Catch2)
 
-add_executable(stockwolf_tests perft_tests.cpp)
+add_executable(stockwolf_tests perft_tests.cpp eval_tests.cpp)
 target_link_libraries(stockwolf_tests PRIVATE stockwolf_core Catch2::Catch2WithMain)
 
 # Pass the path to the bundled EPD suite to the tests.

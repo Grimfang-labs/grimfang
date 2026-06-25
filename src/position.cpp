@@ -1,5 +1,6 @@
 #include "position.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cctype>
 #include <sstream>
@@ -91,6 +92,7 @@ void Position::clear() {
     fullMove_   = 1;
     key_        = 0;
     states_.clear();
+    keyHistory_.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -146,10 +148,15 @@ void Position::set_fen(const std::string& fen) {
     rule50_   = half;
     fullMove_ = full;
 
-    // Finalise the key with the non-piece components.
+    // Finalise the key with the non-piece components. The ep file is hashed
+    // only when an enemy pawn could actually capture, so transpositions that
+    // differ only by a non-capturable phantom ep square share one key.
     if (sideToMove_ == BLACK) key_ ^= Zobrist::side;
     key_ ^= Zobrist::castling[castling_];
-    if (ep_ != SQ_NONE) key_ ^= Zobrist::enpassant[file_of(ep_)];
+    if (ep_capturable(ep_, sideToMove_)) key_ ^= Zobrist::enpassant[file_of(ep_)];
+
+    // Seed the repetition history with the root position.
+    keyHistory_.push_back(key_);
 }
 
 // ---------------------------------------------------------------------------
@@ -222,9 +229,11 @@ void Position::make_move(Move m) {
     st.key      = key_;          // exact pre-move key for restore
     st.captured = NO_PIECE;
 
-    // Remove any current ep file from the key (re-added below on a new double push).
+    // Remove any current ep file from the key (re-added below on a new double
+    // push). The side to move is the one that could have captured, so the same
+    // capturability test that added the component now removes it.
     if (ep_ != SQ_NONE) {
-        key_ ^= Zobrist::enpassant[file_of(ep_)];
+        if (ep_capturable(ep_, us)) key_ ^= Zobrist::enpassant[file_of(ep_)];
         ep_ = SQ_NONE;
     }
 
@@ -264,9 +273,11 @@ void Position::make_move(Move m) {
     }
 
     // ---- New ep square on a pawn double push ----------------------------
+    // The ep square is always set so move generation is unchanged; the key only
+    // gains the ep component when the (new) side to move can actually capture.
     if (pt == PAWN && (to - from == 16 || from - to == 16)) {
         ep_ = static_cast<Square>((from + to) / 2);
-        key_ ^= Zobrist::enpassant[file_of(ep_)];
+        if (ep_capturable(ep_, them)) key_ ^= Zobrist::enpassant[file_of(ep_)];
     }
 
     // ---- Castling rights update -----------------------------------------
@@ -284,6 +295,7 @@ void Position::make_move(Move m) {
     if (us == BLACK) ++fullMove_;
 
     states_.push_back(st);
+    keyHistory_.push_back(key_);
 
     assert(key_ == compute_key());
 }
@@ -291,6 +303,7 @@ void Position::make_move(Move m) {
 void Position::unmake_move(Move m) {
     const StateInfo st = states_.back();
     states_.pop_back();
+    keyHistory_.pop_back();
 
     sideToMove_ = ~sideToMove_;        // back to the mover
     const Color    us   = sideToMove_;
@@ -394,6 +407,14 @@ Bitboard Position::attacks_by(Color by, Bitboard occ) const {
     return attacked;
 }
 
+// An ep square contributes to the hash key only when the side to move could
+// genuinely answer it with a pawn capture. The squares from which a pawn of
+// colour `stm` attacks `ep` are exactly pawn_attacks(~stm, ep).
+bool Position::ep_capturable(Square ep, Color stm) const {
+    if (ep == SQ_NONE) return false;
+    return (pawn_attacks(~stm, ep) & pieces(stm, PAWN)) != 0;
+}
+
 Key Position::compute_key() const {
     Key k = 0;
     Bitboard occ = pieces();
@@ -403,6 +424,25 @@ Key Position::compute_key() const {
     }
     if (sideToMove_ == BLACK) k ^= Zobrist::side;
     k ^= Zobrist::castling[castling_];
-    if (ep_ != SQ_NONE) k ^= Zobrist::enpassant[file_of(ep_)];
+    if (ep_capturable(ep_, sideToMove_)) k ^= Zobrist::enpassant[file_of(ep_)];
     return k;
+}
+
+// ---------------------------------------------------------------------------
+// Draw detection: fifty-move rule OR repetition.
+// ---------------------------------------------------------------------------
+bool Position::is_draw() const {
+    if (rule50_ >= 100)
+        return true;
+
+    const int n = static_cast<int>(keyHistory_.size());
+    // The current position is keyHistory_[n-1]. A repetition can only recur
+    // with the same side to move, so scan back in steps of two, and never
+    // beyond the irreversible window (rule50_ plies).
+    const int end = std::min(rule50_, n - 1);
+    for (int i = 4; i <= end; i += 2) {
+        if (keyHistory_[n - 1 - i] == key_)
+            return true;
+    }
+    return false;
 }
