@@ -192,3 +192,108 @@ void generate_legal(const Position& pos, MoveList& list) {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Captures + promotions only (quiescence seam). Mirrors generate_legal's
+// legality reasoning but restricts non-king targets to enemy-occupied squares
+// (plus all promotion pushes). The produced set equals exactly the legal moves
+// that are a capture or a promotion.
+// ---------------------------------------------------------------------------
+void generate_captures(const Position& pos, MoveList& list) {
+    list.count = 0;
+
+    const Color    us      = pos.side_to_move();
+    const Color    them    = ~us;
+    const Square   ksq     = pos.king_sq(us);
+    const Bitboard occ     = pos.pieces();
+    const Bitboard them_bb = pos.pieces(them);
+
+    const Bitboard checkers = pos.checkers();
+    const Bitboard pinned   = pos.pinned(us);
+
+    const Bitboard occNoKing    = occ ^ square_bb(ksq);
+    const Bitboard enemyAttacks = pos.attacks_by(them, occNoKing);
+
+    // ---- King captures (enemy-occupied, non-attacked squares) -----------
+    {
+        Bitboard b = king_attacks(ksq) & them_bb & ~enemyAttacks;
+        while (b) list.add(Move(ksq, pop_lsb(b)));
+    }
+
+    if (more_than_one(checkers))
+        return;
+
+    // When in check, capturing only helps on the checker's square (sliders'
+    // between squares are empty); a promotion push may also block.
+    Bitboard checkMask;
+    if (checkers) {
+        const Square checkerSq = lsb(checkers);
+        checkMask = checkers | between_bb(ksq, checkerSq);
+    } else {
+        checkMask = FULL_BB;
+    }
+    const Bitboard capTargets = them_bb & checkMask;
+
+    // ---- Knights --------------------------------------------------------
+    {
+        Bitboard knights = pos.pieces(us, KNIGHT) & ~pinned;
+        while (knights) {
+            const Square s = pop_lsb(knights);
+            Bitboard b = knight_attacks(s) & capTargets;
+            while (b) list.add(Move(s, pop_lsb(b)));
+        }
+    }
+
+    // ---- Bishops + queens (diagonal) ------------------------------------
+    {
+        Bitboard movers = pos.pieces(us, BISHOP, QUEEN);
+        while (movers) {
+            const Square s = pop_lsb(movers);
+            Bitboard b = bishop_attacks(s, occ) & capTargets;
+            if (pinned & square_bb(s)) b &= line_bb(ksq, s);
+            while (b) list.add(Move(s, pop_lsb(b)));
+        }
+    }
+
+    // ---- Rooks + queens (orthogonal) ------------------------------------
+    {
+        Bitboard movers = pos.pieces(us, ROOK, QUEEN);
+        while (movers) {
+            const Square s = pop_lsb(movers);
+            Bitboard b = rook_attacks(s, occ) & capTargets;
+            if (pinned & square_bb(s)) b &= line_bb(ksq, s);
+            while (b) list.add(Move(s, pop_lsb(b)));
+        }
+    }
+
+    // ---- Pawns: promotion pushes, captures (incl. promotions), ep -------
+    {
+        const Direction up    = pawn_push(us);
+        const Square     epSq = pos.ep_square();
+        Bitboard         pawns = pos.pieces(us, PAWN);
+
+        while (pawns) {
+            const Square   s        = pop_lsb(pawns);
+            const bool     isPinned = (pinned & square_bb(s)) != 0;
+            const Bitboard rayMask  = isPinned ? line_bb(ksq, s) : FULL_BB;
+
+            // Non-capturing promotion push (still a forcing move).
+            const Square push1 = s + up;
+            if (pos.empty(push1) && relative_rank(us, push1) == RANK_8
+                && (square_bb(push1) & checkMask & rayMask)) {
+                add_pawn_move(list, us, s, push1);
+            }
+
+            // Captures (promote on the last rank).
+            Bitboard caps = pawn_attacks(us, s) & capTargets & rayMask;
+            while (caps)
+                add_pawn_move(list, us, s, pop_lsb(caps));
+
+            // En passant (full legality test, identical to generate_legal).
+            if (epSq != SQ_NONE && (pawn_attacks(us, s) & square_bb(epSq))) {
+                if (ep_is_legal(pos, us, ksq, s, epSq))
+                    list.add(Move::make<EN_PASSANT>(s, epSq));
+            }
+        }
+    }
+}
