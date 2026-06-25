@@ -54,10 +54,14 @@ add_library(stockwolf_core STATIC
   src/movegen.cpp
   src/perft.cpp
   src/eval.cpp
-  src/search.cpp)
+  src/search.cpp
+  src/timeman.cpp
+  src/uci.cpp)
+
+find_package(Threads REQUIRED)
 
 target_include_directories(stockwolf_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(stockwolf_core PUBLIC stockwolf_flags)
+target_link_libraries(stockwolf_core PUBLIC stockwolf_flags Threads::Threads)
 
 # ---------------------------------------------------------------------------
 # Engine executable

@@ -8,6 +8,7 @@
 #include "eval.hpp"
 #include "movegen.hpp"
 #include "position.hpp"
+#include "timeman.hpp"
 
 // ===========================================================================
 // search.cpp - negamax alpha-beta + quiescence + iterative deepening.
@@ -51,11 +52,11 @@ public:
         prevBest_  = MOVE_NONE;
         startTime_ = Clock::now();
 
-        // Time management is wired in sub-step 4 (timeman); for now the search
-        // is bounded only by depth, the node limit, and the stop flag.
-        useTime_    = false;
-        softMs_     = 0;
-        hardMs_     = 0;
+        // Time budget (no-op when only depth/nodes/infinite were given).
+        const TimeBudget tb = compute_budget(limits, pos.side_to_move());
+        useTime_    = tb.useTime;
+        softMs_     = tb.soft;
+        hardMs_     = tb.hard;
         limitNodes_ = limits.nodes;
 
         const int maxDepth = (limits.depth > 0)

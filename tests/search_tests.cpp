@@ -152,3 +152,37 @@ TEST_CASE("draw: fifty-move rule", "[search][draw]") {
     pos.set_fen("4k3/8/8/8/8/8/8/4K3 w - - 100 1");
     REQUIRE(pos.is_draw());
 }
+
+TEST_CASE("self-play smoke: full games stay legal and terminate", "[search][selfplay]") {
+    const std::vector<std::string> openings = {
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+    };
+
+    for (const auto& fen : openings) {
+        Position pos;
+        pos.set_fen(fen);
+
+        for (int ply = 0; ply < 120; ++ply) {
+            if (pos.is_draw())
+                break;
+
+            MoveList legal;
+            generate_legal(pos, legal);
+            if (legal.count == 0)
+                break;   // checkmate or stalemate ends the game
+
+            const Search::Result r = Search::search_fixed(pos, 4);
+            REQUIRE(r.bestMove != MOVE_NONE);
+
+            bool legalChoice = false;
+            for (int i = 0; i < legal.count; ++i)
+                if (legal.moves[i] == r.bestMove) { legalChoice = true; break; }
+            REQUIRE(legalChoice);
+
+            pos.make_move(r.bestMove);
+        }
+        SUCCEED();   // reached the end of the game without crashing
+    }
+}
