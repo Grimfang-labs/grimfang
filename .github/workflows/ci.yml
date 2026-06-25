@@ -24,4 +24,4 @@ jobs:
 
       - name: Test (fast)
         working-directory: build
-        run: ctest --build-config Release --output-on-failure --exclude-regex "\[slow\]"
+        run: ctest --build-config Release --output-on-failure --label-exclude slow
