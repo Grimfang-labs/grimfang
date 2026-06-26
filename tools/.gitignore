@@ -1,0 +1,16 @@
+# Downloaded / built artifacts that live in tools/ but must not be committed.
+# (*.exe is already ignored repo-wide, covering fastchess.exe and stockwolf-base.exe.)
+
+# fast-chess binary (download manually)
+/fastchess
+/fast-chess
+
+# opening books (download manually)
+/books/*
+!/books/.gitkeep
+
+# SPRT outputs
+*.pgn
+config.json
+*.sqlite3
+*.log
