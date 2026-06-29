@@ -105,6 +105,8 @@ FC_ARGS=(
     -each "tc=${TC}" proto=uci "option.Hash=${HASH}" "option.Threads=${THREADS}"
     -rounds "${ROUNDS}" -repeat -concurrency "${CONCURRENCY}"
     -openings "file=${BOOK}" "format=${FORMAT}" order=random
+    -draw movenumber=40,movecount=8,score=10
+    -resign movecount=3,score=400
     -sprt "elo0=${ELO0}" "elo1=${ELO1}" "alpha=${ALPHA}" "beta=${BETA}"
     -ratinginterval 10
     -recover

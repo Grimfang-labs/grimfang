@@ -131,10 +131,12 @@ try {
         '-each', "tc=$Tc", 'proto=uci', "option.Hash=$Hash", "option.Threads=$Threads",
         '-rounds', "$Rounds", '-repeat', '-concurrency', "$Concurrency",
         '-openings', "file=$bookAbs", "format=$BookFormat", 'order=random',
+        '-draw', 'movenumber=40,movecount=8,score=10',
+        '-resign', 'movecount=3,score=400',
         '-sprt', "elo0=$Elo0", "elo1=$Elo1", "alpha=$Alpha", "beta=$Beta",
         '-ratinginterval', '10',
         '-recover',
-        '-pgnout', "$PgnOut"
+        '-pgnout', "file=$PgnOut"
     )
 
     Write-Host '--- SPRT configuration ---------------------------------------------' -ForegroundColor Cyan
