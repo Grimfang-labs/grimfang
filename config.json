@@ -1,0 +1,162 @@
+{
+    "resign": {
+        "move_count": 3,
+        "score": 600,
+        "twosided": false,
+        "enabled": true
+    },
+    "draw": {
+        "move_number": 40,
+        "move_count": 8,
+        "score": 10,
+        "enabled": true
+    },
+    "maxmoves": {
+        "move_count": 1,
+        "enabled": false
+    },
+    "tb_adjudication": {
+        "syzygy_dirs": "",
+        "max_pieces": 0,
+        "ignore_50_move_rule": false,
+        "enabled": false
+    },
+    "opening": {
+        "file": "C:\\Users\\shywolf91\\Dev\\StockWolf\\stockwolf\\tools\\books\\8moves_v3.epd",
+        "format": 0,
+        "order": 0,
+        "plies": -1,
+        "start": 1
+    },
+    "pgn": {
+        "additional_lines_rgx": [],
+        "event_name": "Fastchess Tournament",
+        "site": "?",
+        "file": "tools/out.pgn",
+        "notation": 0,
+        "append_file": true,
+        "track_nodes": false,
+        "track_seldepth": false,
+        "track_nps": false,
+        "track_hashfull": false,
+        "track_tbhits": false,
+        "track_timeleft": false,
+        "track_latency": false,
+        "track_pv": false,
+        "min": false,
+        "crc": false
+    },
+    "epd": {
+        "file": "",
+        "append_file": true
+    },
+    "sprt": {
+        "alpha": 0.05,
+        "beta": 0.05,
+        "elo0": 0.0,
+        "elo1": 5.0,
+        "model": "normalized",
+        "enabled": true
+    },
+    "config_name": "config.json",
+    "output": 0,
+    "seed": 1607724086115523441,
+    "variant": 0,
+    "type": 0,
+    "gauntlet_seeds": 1,
+    "ratinginterval": 10,
+    "scoreinterval": 1,
+    "wait": 0,
+    "autosaveinterval": 20,
+    "games": 2,
+    "rounds": 20000,
+    "concurrency": 10,
+    "force_concurrency": false,
+    "recover": true,
+    "noswap": false,
+    "reverse": false,
+    "report_penta": true,
+    "affinity": false,
+    "show_latency": false,
+    "log": {
+        "file": "",
+        "level": 2,
+        "append_file": true,
+        "compress": false,
+        "realtime": true,
+        "engine_coms": false
+    },
+    "engines": [
+        {
+            "name": "new",
+            "dir": "",
+            "cmd": "C:\\Users\\shywolf91\\Dev\\StockWolf\\stockwolf\\tools\\stockwolf-base.exe",
+            "args": "",
+            "restart": false,
+            "options": [
+                [
+                    "Hash",
+                    "16"
+                ],
+                [
+                    "Threads",
+                    "1"
+                ]
+            ],
+            "limit": {
+                "tc": {
+                    "increment": 80,
+                    "fixed_time": 0,
+                    "time": 8000,
+                    "moves": 0,
+                    "timemargin": 0
+                },
+                "nodes": 0,
+                "plies": 0
+            },
+            "variant": 0
+        },
+        {
+            "name": "base",
+            "dir": "",
+            "cmd": "C:\\Users\\shywolf91\\Dev\\StockWolf\\stockwolf\\tools\\stockwolf-base.exe",
+            "args": "",
+            "restart": false,
+            "options": [
+                [
+                    "Hash",
+                    "16"
+                ],
+                [
+                    "Threads",
+                    "1"
+                ]
+            ],
+            "limit": {
+                "tc": {
+                    "increment": 80,
+                    "fixed_time": 0,
+                    "time": 8000,
+                    "moves": 0,
+                    "timemargin": 0
+                },
+                "nodes": 0,
+                "plies": 0
+            },
+            "variant": 0
+        }
+    ],
+    "stats": {
+        "new vs base": {
+            "wins": 9887,
+            "losses": 9821,
+            "draws": 5652,
+            "penta_WW": 897,
+            "penta_WD": 1513,
+            "penta_WL": 6580,
+            "penta_DD": 1320,
+            "penta_LD": 1499,
+            "penta_LL": 871
+        }
+    }
+}
