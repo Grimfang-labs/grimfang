@@ -9,13 +9,20 @@
 #include "movegen.hpp"
 #include "position.hpp"
 #include "timeman.hpp"
+#include "tt.hpp"
 
 // ===========================================================================
 // search.cpp - negamax alpha-beta + quiescence + iterative deepening.
 //
-// Move ordering (Stage 2): captures first by MVV-LVA, quiet moves in
-// generation order, and at the root the previous iteration's best move first.
-// No transposition table, killers, history or SEE.
+// Move ordering (Stage 3): the transposition-table move first, then captures
+// by MVV-LVA, then quiet moves in generation order. A shared transposition
+// table provides depth-preferred cutoffs at non-PV nodes and a best-move hint
+// everywhere. Mate scores are made node-relative on store / re-rooted on probe.
+// No killers, history or SEE yet.
+//
+// PV-node classification: a node is a PV node iff it is reached by always
+// following the first (best) move from the root. TT cutoffs are taken only at
+// non-PV, non-root nodes so the principal variation is searched in full.
 // ===========================================================================
 
 namespace {
@@ -49,8 +56,11 @@ public:
         nodes_     = 0;
         seldepth_  = 0;
         aborted_   = false;
-        prevBest_  = MOVE_NONE;
         startTime_ = Clock::now();
+
+        // One search == one generation. Entries from earlier searches stay in
+        // the table but age out under replacement.
+        TT.new_search();
 
         // Time budget (no-op when only depth/nodes/infinite were given).
         const TimeBudget tb = compute_budget(limits, pos.side_to_move());
@@ -79,7 +89,8 @@ public:
             if (useTime_ && depth > 1 && elapsed_ms() >= softMs_)
                 break;
 
-            const Value score = negamax(pos, depth, -VALUE_INFINITE, VALUE_INFINITE, 0);
+            const Value score =
+                negamax(pos, depth, -VALUE_INFINITE, VALUE_INFINITE, 0, /*pvNode=*/true);
 
             const bool haveMove = pvLength_[0] > 0;
             if (aborted_) {
@@ -97,7 +108,6 @@ public:
             result.score    = score;
             result.depth    = depth;
             if (haveMove) result.bestMove = pvTable_[0][0];
-            prevBest_        = result.bestMove;
 
             if (printInfo) print_info(depth, score, pos);
 
@@ -121,7 +131,6 @@ private:
     std::uint64_t      limitNodes_ = 0;
     int                seldepth_   = 0;
     bool               aborted_    = false;
-    Move               prevBest_   = MOVE_NONE;
 
     Clock::time_point startTime_;
     bool              useTime_ = false;
@@ -201,6 +210,7 @@ private:
                   << " score " << score_to_uci(score)
                   << " nodes " << nodes_
                   << " nps " << nps
+                  << " hashfull " << TT.hashfull()
                   << " time " << ms
                   << " pv";
         for (int i = 0; i < pvLength_[0]; ++i)
@@ -242,8 +252,8 @@ private:
         return alpha;
     }
 
-    // ---- Negamax alpha-beta --------------------------------------------
-    Value negamax(Position& pos, int depth, Value alpha, Value beta, int ply) {
+    // ---- Negamax alpha-beta (fail-soft) --------------------------------
+    Value negamax(Position& pos, int depth, Value alpha, Value beta, int ply, bool pvNode) {
         ++nodes_;
         if (ply > seldepth_) seldepth_ = ply;
         pvLength_[ply] = ply;
@@ -257,6 +267,25 @@ private:
         if (depth <= 0)
             return quiescence(pos, alpha, beta, ply);
 
+        const Key   key        = pos.key();
+        const Value alphaOrig  = alpha;
+
+        // ---- Transposition-table probe ---------------------------------
+        TTEntry*   tte    = nullptr;
+        const bool ttHit  = TT.probe(key, tte);
+        const Move ttMove = ttHit ? tte->move() : MOVE_NONE;
+
+        // A sufficiently deep entry can cut, but only at a non-PV, non-root
+        // node so the principal variation is always searched in full.
+        if (ttHit && !pvNode && ply > 0 && tte->depth() >= depth) {
+            const Value ttValue = value_from_tt(tte->value(), ply);
+            const Bound b       = tte->bound();
+            if (b == BOUND_EXACT
+                || (b == BOUND_LOWER && ttValue >= beta)
+                || (b == BOUND_UPPER && ttValue <= alpha))
+                return ttValue;
+        }
+
         MoveList list;
         generate_legal(pos, list);
 
@@ -264,29 +293,47 @@ private:
             return pos.checkers() ? static_cast<Value>(-(VALUE_MATE - ply))
                                   : VALUE_DRAW;
 
-        order_moves(pos, list, ply == 0 ? prevBest_ : MOVE_NONE);
+        order_moves(pos, list, ttMove);
+
+        Value bestScore = -VALUE_INFINITE;
+        Move  bestMove  = MOVE_NONE;
 
         for (int i = 0; i < list.count; ++i) {
             const Move m = list.moves[i];
             pos.make_move(m);
-            const Value score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1);
+            // Only the first (best) move of a PV node continues the PV.
+            const bool childPv = pvNode && (i == 0);
+            const Value score  = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv);
             pos.unmake_move(m);
 
             if (aborted_)
                 return alpha;
 
-            if (score >= beta)
-                return beta;                       // fail-hard cutoff
+            if (score > bestScore) {
+                bestScore = score;
+                bestMove  = m;
 
-            if (score > alpha) {
-                alpha = score;
-                pvTable_[ply][ply] = m;
-                for (int next = ply + 1; next < pvLength_[ply + 1]; ++next)
-                    pvTable_[ply][next] = pvTable_[ply + 1][next];
-                pvLength_[ply] = pvLength_[ply + 1];
+                if (score > alpha) {
+                    alpha = score;
+                    pvTable_[ply][ply] = m;
+                    for (int next = ply + 1; next < pvLength_[ply + 1]; ++next)
+                        pvTable_[ply][next] = pvTable_[ply + 1][next];
+                    pvLength_[ply] = pvLength_[ply + 1];
+
+                    if (score >= beta)
+                        break;                     // fail-high cutoff
+                }
             }
         }
-        return alpha;
+
+        // ---- Single store at node exit ---------------------------------
+        const Bound bound = (bestScore >= beta)     ? BOUND_LOWER
+                          : (bestScore > alphaOrig) ? BOUND_EXACT
+                                                    : BOUND_UPPER;
+        // Static eval is not cached at internal nodes yet (RFP/NMP rung).
+        TT.store(key, bestMove, bestScore, VALUE_NONE, depth, bound, ply);
+
+        return bestScore;
     }
 };
 
@@ -341,11 +388,17 @@ std::uint64_t Search::bench(int depth) {
     std::atomic<bool> never{ false };
     std::uint64_t     totalNodes = 0;
 
+    // Reproducible signature: a fixed-size table, cleared before each position
+    // so the node count is independent of any prior `setoption Hash` state.
+    TT.resize(16);
+
     const auto start = Clock::now();
     int idx = 0;
     for (const char* fen : kBenchFens) {
         Position pos;
         pos.set_fen(fen);
+
+        TT.clear();
 
         Searcher s(never);
         Limits   limits;

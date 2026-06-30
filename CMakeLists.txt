@@ -54,6 +54,7 @@ add_library(stockwolf_core STATIC
   src/movegen.cpp
   src/perft.cpp
   src/eval.cpp
+  src/tt.cpp
   src/search.cpp
   src/timeman.cpp
   src/uci.cpp)

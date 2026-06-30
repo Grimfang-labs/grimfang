@@ -13,6 +13,7 @@ add_executable(stockwolf_tests
   perft_tests.cpp
   eval_tests.cpp
   search_tests.cpp
+  tt_tests.cpp
   uci_tests.cpp)
 target_link_libraries(stockwolf_tests PRIVATE stockwolf_core Catch2::Catch2WithMain)
 

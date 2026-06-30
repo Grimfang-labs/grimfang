@@ -1,7 +1,9 @@
 #include "uci.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <sstream>
@@ -15,6 +17,7 @@
 #include "perft.hpp"
 #include "position.hpp"
 #include "search.hpp"
+#include "tt.hpp"
 #include "zobrist.hpp"
 
 // ===========================================================================
@@ -26,6 +29,11 @@ namespace {
 constexpr char ENGINE_NAME[]    = "StockWolf";
 constexpr char ENGINE_VERSION[] = "2.0";
 constexpr char ENGINE_AUTHOR[]  = "shywolf91";
+
+// Hash UCI option bounds (MB).
+constexpr int HASH_DEFAULT = 16;
+constexpr int HASH_MIN     = 1;
+constexpr int HASH_MAX     = 1024;
 
 void run_perft(Position& pos, int depth) {
     using clock = std::chrono::steady_clock;
@@ -109,6 +117,30 @@ private:
             apply_moves(ss);
     }
 
+    // Parse `setoption name <Name> value <V>`. Only `Hash` is functional.
+    void cmd_setoption(std::istringstream& ss) {
+        std::string token, name, value;
+        if (!(ss >> token) || token != "name")
+            return;
+
+        // The name may contain spaces; collect tokens until "value".
+        while (ss >> token && token != "value")
+            name += (name.empty() ? "" : " ") + token;
+        if (token == "value")
+            std::getline(ss >> std::ws, value);
+
+        if (name == "Hash") {
+            try {
+                int mb = std::stoi(value);
+                mb = std::max(HASH_MIN, std::min(HASH_MAX, mb));
+                TT.resize(static_cast<std::size_t>(mb));
+            } catch (...) {
+                // Ignore a malformed value; keep the current table.
+            }
+        }
+        // Other options are accepted and ignored.
+    }
+
     void cmd_go(std::istringstream& ss) {
         Search::Limits limits;
         std::string token;
@@ -131,6 +163,8 @@ private:
 void UciLoop::run() {
     std::cout.setf(std::ios::unitbuf);   // line-ish flushing for GUIs
 
+    TT.resize(HASH_DEFAULT);             // default table until `setoption Hash`
+
     std::string line;
     while (std::getline(std::cin, line)) {
         std::istringstream ss(line);
@@ -141,15 +175,18 @@ void UciLoop::run() {
         if (token == "uci") {
             std::cout << "id name " << ENGINE_NAME << ' ' << ENGINE_VERSION << '\n';
             std::cout << "id author " << ENGINE_AUTHOR << '\n';
-            std::cout << "option name Hash type spin default 16 min 1 max 1024\n";
+            std::cout << "option name Hash type spin default " << HASH_DEFAULT
+                      << " min " << HASH_MIN << " max " << HASH_MAX << '\n';
             std::cout << "option name Threads type spin default 1 min 1 max 1\n";
             std::cout << "uciok" << std::endl;
         } else if (token == "isready") {
             std::cout << "readyok" << std::endl;
         } else if (token == "setoption") {
-            // No functional options this stage; parse gracefully and ignore.
+            ensure_idle();
+            cmd_setoption(ss);
         } else if (token == "ucinewgame") {
             ensure_idle();
+            TT.clear();
             pos_ = Position::startpos();
         } else if (token == "position") {
             ensure_idle();
