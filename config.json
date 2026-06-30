@@ -60,7 +60,7 @@
     },
     "config_name": "config.json",
     "output": 0,
-    "seed": 18131957347953639224,
+    "seed": 16783787746773587693,
     "variant": 0,
     "type": 0,
     "gauntlet_seeds": 1,
@@ -90,7 +90,7 @@
         {
             "name": "new",
             "dir": "",
-            "cmd": "C:\\Users\\shywolf91\\Dev\\StockWolf\\stockwolf\\tools\\stockwolf-tt.exe",
+            "cmd": "C:\\Users\\shywolf91\\Dev\\StockWolf\\stockwolf\\tools\\stockwolf-pvs.exe",
             "args": "",
             "restart": false,
             "options": [
@@ -148,15 +148,15 @@
     ],
     "stats": {
         "new vs base": {
-            "wins": 277,
-            "losses": 53,
-            "draws": 70,
-            "penta_WW": 94,
-            "penta_WD": 53,
-            "penta_WL": 36,
-            "penta_DD": 2,
-            "penta_LD": 13,
-            "penta_LL": 2
+            "wins": 1519,
+            "losses": 1334,
+            "draws": 971,
+            "penta_WW": 253,
+            "penta_WD": 359,
+            "penta_WL": 654,
+            "penta_DD": 147,
+            "penta_LD": 318,
+            "penta_LL": 181
         }
     }
 }
