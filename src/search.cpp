@@ -301,9 +301,24 @@ private:
         for (int i = 0; i < list.count; ++i) {
             const Move m = list.moves[i];
             pos.make_move(m);
-            // Only the first (best) move of a PV node continues the PV.
-            const bool childPv = pvNode && (i == 0);
-            const Value score  = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, childPv);
+
+            // Principal Variation Search: trust the move ordering. The first
+            // move gets the full window; later moves get a null-window scout
+            // (a non-PV child). A scout that lands strictly inside (alpha, beta)
+            // refutes the ordering assumption for that move, so re-search it at
+            // the SAME depth with the full window (a PV child). PVS changes the
+            // node count, not the result. At non-PV nodes beta == alpha + 1, so
+            // the scout window equals the full window and the re-search can
+            // never fire -- PVS does real work only at PV nodes, automatically.
+            Value score;
+            if (i == 0) {
+                score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, pvNode);
+            } else {
+                score = -negamax(pos, depth - 1, -alpha - 1, -alpha, ply + 1, /*pvNode=*/false);
+                if (score > alpha && score < beta)
+                    score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, pvNode);
+            }
+
             pos.unmake_move(m);
 
             if (aborted_)
