@@ -6,6 +6,7 @@
 #include <string>
 
 #include "eval.hpp"
+#include "killers.hpp"
 #include "movegen.hpp"
 #include "position.hpp"
 #include "timeman.hpp"
@@ -18,7 +19,8 @@
 // by MVV-LVA, then quiet moves in generation order. A shared transposition
 // table provides depth-preferred cutoffs at non-PV nodes and a best-move hint
 // everywhere. Mate scores are made node-relative on store / re-rooted on probe.
-// No killers, history or SEE yet.
+// Quiet moves that cause a beta cutoff are remembered as killers (two per ply)
+// and ordered ahead of generic quiets. No history or SEE yet.
 //
 // PV-node classification: a node is a PV node iff it is reached by always
 // following the first (best) move from the root. TT cutoffs are taken only at
@@ -59,8 +61,10 @@ public:
         startTime_ = Clock::now();
 
         // One search == one generation. Entries from earlier searches stay in
-        // the table but age out under replacement.
+        // the table but age out under replacement. Killers are search-local and
+        // start empty.
         TT.new_search();
+        killers_.clear();
 
         // Time budget (no-op when only depth/nodes/infinite were given).
         const TimeBudget tb = compute_budget(limits, pos.side_to_move());
@@ -140,6 +144,8 @@ private:
     Move pvTable_[MAX_PLY][MAX_PLY];
     int  pvLength_[MAX_PLY] = { 0 };
 
+    KillerTable killers_;
+
     std::int64_t elapsed_ms() const {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
                    Clock::now() - startTime_).count();
@@ -159,7 +165,7 @@ private:
         return aborted_;
     }
 
-    int score_move(const Position& pos, Move m, Move ttMove) const {
+    int score_move(const Position& pos, Move m, Move ttMove, Move k1, Move k2) const {
         if (ttMove.is_ok() && m == ttMove)
             return TT_MOVE_BONUS;
 
@@ -177,14 +183,20 @@ private:
         if (mt == PROMOTION)
             score += PROMOTION_BONUS + orderValue[m.promotion_type()];
 
+        // Quiet move (no capture/promotion signal): fall back to killers.
+        if (score == 0)
+            return killer_bonus(m, k1, k2);
+
         return score;
     }
 
     // Stable insertion sort, descending by score (ties keep generation order).
-    void order_moves(const Position& pos, MoveList& list, Move ttMove) const {
+    // k1/k2 are this ply's killers (MOVE_NONE to disable, e.g. in quiescence).
+    void order_moves(const Position& pos, MoveList& list, Move ttMove,
+                     Move k1, Move k2) const {
         int scores[MoveList::CAPACITY];
         for (int i = 0; i < list.count; ++i)
-            scores[i] = score_move(pos, list.moves[i], ttMove);
+            scores[i] = score_move(pos, list.moves[i], ttMove, k1, k2);
 
         for (int i = 1; i < list.count; ++i) {
             const Move m  = list.moves[i];
@@ -234,7 +246,7 @@ private:
 
         MoveList caps;
         generate_captures(pos, caps);
-        order_moves(pos, caps, MOVE_NONE);
+        order_moves(pos, caps, MOVE_NONE, MOVE_NONE, MOVE_NONE);
 
         for (int i = 0; i < caps.count; ++i) {
             const Move m = caps.moves[i];
@@ -293,7 +305,7 @@ private:
             return pos.checkers() ? static_cast<Value>(-(VALUE_MATE - ply))
                                   : VALUE_DRAW;
 
-        order_moves(pos, list, ttMove);
+        order_moves(pos, list, ttMove, killers_.primary(ply), killers_.secondary(ply));
 
         Value bestScore = -VALUE_INFINITE;
         Move  bestMove  = MOVE_NONE;
@@ -335,8 +347,13 @@ private:
                         pvTable_[ply][next] = pvTable_[ply + 1][next];
                     pvLength_[ply] = pvLength_[ply + 1];
 
-                    if (score >= beta)
+                    if (score >= beta) {
+                        // Remember a quiet refutation for sibling nodes at this
+                        // ply. Captures/promotions already order well via MVV-LVA.
+                        if (is_quiet_move(pos, m))
+                            killers_.update(ply, m);
                         break;                     // fail-high cutoff
+                    }
                 }
             }
         }
