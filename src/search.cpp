@@ -6,6 +6,7 @@
 #include <string>
 
 #include "eval.hpp"
+#include "history.hpp"
 #include "killers.hpp"
 #include "movegen.hpp"
 #include "position.hpp"
@@ -20,7 +21,9 @@
 // table provides depth-preferred cutoffs at non-PV nodes and a best-move hint
 // everywhere. Mate scores are made node-relative on store / re-rooted on probe.
 // Quiet moves that cause a beta cutoff are remembered as killers (two per ply)
-// and ordered ahead of generic quiets. No history or SEE yet.
+// and ordered ahead of generic quiets; a butterfly history table (rewarded on
+// quiet cutoffs, penalised for quiets tried first) orders the remaining quiets.
+// No SEE yet.
 //
 // PV-node classification: a node is a PV node iff it is reached by always
 // following the first (best) move from the root. TT cutoffs are taken only at
@@ -61,10 +64,11 @@ public:
         startTime_ = Clock::now();
 
         // One search == one generation. Entries from earlier searches stay in
-        // the table but age out under replacement. Killers are search-local and
-        // start empty.
+        // the table but age out under replacement. Killers and history are
+        // search-local and start empty.
         TT.new_search();
         killers_.clear();
+        history_.clear();
 
         // Time budget (no-op when only depth/nodes/infinite were given).
         const TimeBudget tb = compute_budget(limits, pos.side_to_move());
@@ -144,7 +148,8 @@ private:
     Move pvTable_[MAX_PLY][MAX_PLY];
     int  pvLength_[MAX_PLY] = { 0 };
 
-    KillerTable killers_;
+    KillerTable  killers_;
+    HistoryTable history_;
 
     std::int64_t elapsed_ms() const {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -183,9 +188,16 @@ private:
         if (mt == PROMOTION)
             score += PROMOTION_BONUS + orderValue[m.promotion_type()];
 
-        // Quiet move (no capture/promotion signal): fall back to killers.
-        if (score == 0)
-            return killer_bonus(m, k1, k2);
+        // Quiet move (no capture/promotion signal): killers first, then order
+        // the rest by history. History values (|.| < MAX_HISTORY) sit far below
+        // the killer band, so the total order stays TT > captures > K1 > K2 >
+        // history-sorted quiets.
+        if (score == 0) {
+            const int kb = killer_bonus(m, k1, k2);
+            if (kb)
+                return kb;
+            return history_.get(pos.side_to_move(), m);
+        }
 
         return score;
     }
@@ -349,9 +361,20 @@ private:
 
                     if (score >= beta) {
                         // Remember a quiet refutation for sibling nodes at this
-                        // ply. Captures/promotions already order well via MVV-LVA.
-                        if (is_quiet_move(pos, m))
+                        // ply, and update history: reward the cutoff move,
+                        // penalise the quiets tried before it (history gravity).
+                        // Captures/promotions already order well via MVV-LVA and
+                        // are left untouched.
+                        if (is_quiet_move(pos, m)) {
                             killers_.update(ply, m);
+
+                            const Color stm   = pos.side_to_move();
+                            const int   bonus = history_bonus(depth);
+                            history_.update(stm, m, bonus);
+                            for (int j = 0; j < i; ++j)
+                                if (is_quiet_move(pos, list.moves[j]))
+                                    history_.update(stm, list.moves[j], -bonus);
+                        }
                         break;                     // fail-high cutoff
                     }
                 }
