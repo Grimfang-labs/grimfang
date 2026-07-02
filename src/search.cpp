@@ -41,6 +41,11 @@ constexpr int CAPTURE_BONUS   = 1'000'000;
 constexpr int PROMOTION_BONUS =   900'000;
 constexpr int TT_MOVE_BONUS   = 10'000'000;   // root previous-best move
 
+// Reverse futility pruning (static null move): only at shallow depths, and
+// only when the static eval clears beta by a per-ply margin.
+constexpr int RFP_MAX_DEPTH = 8;
+constexpr int RFP_MARGIN    = 100;   // centipawns per ply of remaining depth
+
 // Poll the stop conditions roughly every this many nodes.
 constexpr std::uint64_t POLL_INTERVAL = 2048;
 
@@ -323,6 +328,21 @@ private:
         // nodes; used by null-move pruning now and by RFP next rung. Meaningless
         // when in check, so left as VALUE_NONE there.
         const Value staticEval = inCheck ? VALUE_NONE : Eval::evaluate(pos);
+
+        // ---- Reverse futility pruning (static null move) ---------------
+        // Cheapest pruner: no search at all. If the static eval is so far above
+        // beta that even a generous per-ply margin can't drag it back, assume a
+        // real move would also hold and return the eval (fail-soft). Shallow
+        // depths only; never near a mate bound (a heuristic margin vs a mate
+        // score is unsound).
+        if (!pvNode
+            && !inCheck
+            && ply > 0
+            && depth <= RFP_MAX_DEPTH
+            && std::abs(beta) < VALUE_MATE_IN_MAX_PLY
+            && staticEval - RFP_MARGIN * depth >= beta) {
+            return staticEval;
+        }
 
         // ---- Null-move pruning -----------------------------------------
         // If passing still fails high over beta from a reduced search, a real
