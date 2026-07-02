@@ -148,6 +148,38 @@ Periodic lines (every `-ratinginterval` rounds) and the final summary report:
   count — this is why `-repeat` and a book matter. Healthy non-regressions are
   draw-heavy (mass piled in the middle bins).
 
+## Crash log & reliability
+
+`sprt.ps1` passes `-log file=tools/fastchess.log level=warn` to fast-chess, so
+engine warnings and abnormal exits are recorded. **After any `Crashed: N`
+report in the fast-chess summary, look at `tools/fastchess.log` first** (it is
+git-ignored via `tools/.gitignore`). Attach it when reporting a crash.
+
+Quick teardown/degenerate-clock smoke test (independent of an SPRT run):
+
+```powershell
+./tools/reliability_check.ps1 -Exe build/Release/stockwolf.exe
+```
+
+It spawns the engine hundreds of times and kills the `go`/`stop`/`quit`
+sequence at randomized points (plus degenerate clocks like `go movetime 1`),
+asserting: process always exits 0, exactly one `bestmove` per `go`, no hang.
+
+### Reliability notes (TODO / history)
+
+- **2026-06-30:** one engine crash observed in a 25k-game self-match at
+  concurrency 10 (`base — Crashed: 1`) after ~16 h; not reproduced in the
+  ~24k games since. No stderr was captured at the time, so it was
+  undiagnosable.
+- **Defensive fixes applied (`chore/reliability`):** hardened the stop/quit
+  search-thread teardown (worker declared last so it is destroyed first;
+  defensive join before re-spawning; line-atomic stdout so `readyok` can't
+  splice a search `info`/`bestmove` line), and added a hard floor
+  (`MIN_THINK_MS = 5`) plus a degenerate-clock guard to the time manager so a
+  budget can never come out `<= 0` and the engine always returns a legal move.
+- **Now:** stderr is captured via `-log`. If a crash recurs, attach
+  `tools/fastchess.log`.
+
 ## Per-feature workflow (repeat for every rung)
 
 1. `git checkout -b feat/<name>`

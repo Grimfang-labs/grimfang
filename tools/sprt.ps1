@@ -136,6 +136,9 @@ try {
         '-sprt', "elo0=$Elo0", "elo1=$Elo1", "alpha=$Alpha", "beta=$Beta",
         '-ratinginterval', '10',
         '-recover',
+        # Capture engine warnings/crashes so a future "Crashed: N" leaves
+        # evidence. Inspect tools/fastchess.log after any crash report.
+        '-log', 'file=tools/fastchess.log', 'level=warn',
         '-pgnout', "file=$PgnOut"
     )
 

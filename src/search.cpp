@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 #include <string>
 
 #include "eval.hpp"
@@ -10,6 +11,7 @@
 #include "killers.hpp"
 #include "movegen.hpp"
 #include "position.hpp"
+#include "sync.hpp"
 #include "timeman.hpp"
 #include "tt.hpp"
 
@@ -229,17 +231,21 @@ private:
         const std::uint64_t nps =
             (ms > 0) ? (nodes_ * 1000ULL) / static_cast<std::uint64_t>(ms) : nodes_ * 1000ULL;
 
-        std::cout << "info depth " << depth
-                  << " seldepth " << seldepth_
-                  << " score " << score_to_uci(score)
-                  << " nodes " << nodes_
-                  << " nps " << nps
-                  << " hashfull " << TT.hashfull()
-                  << " time " << ms
-                  << " pv";
+        // Assemble the whole line, then emit it under the shared IO lock so it
+        // can't interleave with a concurrent `readyok` from the UCI thread.
+        std::ostringstream oss;
+        oss << "info depth " << depth
+            << " seldepth " << seldepth_
+            << " score " << score_to_uci(score)
+            << " nodes " << nodes_
+            << " nps " << nps
+            << " hashfull " << TT.hashfull()
+            << " time " << ms
+            << " pv";
         for (int i = 0; i < pvLength_[0]; ++i)
-            std::cout << ' ' << to_uci(pvTable_[0][i]);
-        std::cout << std::endl;
+            oss << ' ' << to_uci(pvTable_[0][i]);
+        oss << '\n';
+        sync_cout(oss.str());
     }
 
     // ---- Quiescence ----------------------------------------------------
@@ -398,7 +404,9 @@ Search::Result Search::search(Position& pos, const Search::Limits& limits,
                               std::atomic<bool>& stop) {
     Searcher s(stop);
     const Search::Result r = s.iterate(pos, limits, /*printInfo=*/true);
-    std::cout << "bestmove " << to_uci(r.bestMove) << std::endl;
+    // Exactly one bestmove per `go`: iterate always yields a legal fallback
+    // move (or MOVE_NONE -> "0000" for a terminal position). Line-atomic emit.
+    sync_cout("bestmove " + to_uci(r.bestMove) + "\n");
     return r;
 }
 

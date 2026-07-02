@@ -17,6 +17,7 @@
 #include "perft.hpp"
 #include "position.hpp"
 #include "search.hpp"
+#include "sync.hpp"
 #include "tt.hpp"
 #include "zobrist.hpp"
 
@@ -54,11 +55,16 @@ public:
     void run();
 
 private:
+    // Declaration order matters for teardown: the worker thread references
+    // pos_ and stop_ via `this`, so worker_ is declared LAST and therefore
+    // destroyed FIRST -- the thread is always torn down before the state it
+    // touches, even on an abnormal path.
     Position          pos_ = Position::startpos();
-    std::thread       worker_;
     std::atomic<bool> stop_{ false };
+    std::thread       worker_;
 
-    // Stop any running search and join the worker thread.
+    // Signal stop, then join the worker. Idempotent: safe to call when no
+    // search is running or when the worker has already finished naturally.
     void ensure_idle() {
         stop_.store(true, std::memory_order_relaxed);
         if (worker_.joinable())
@@ -66,6 +72,11 @@ private:
     }
 
     void start_search(const Search::Limits& limits) {
+        // Never assign over a joinable thread (that would std::terminate); a
+        // previous search must already be joined. ensure_idle() precedes every
+        // start in run(), but join defensively here too.
+        if (worker_.joinable())
+            worker_.join();
         stop_.store(false, std::memory_order_relaxed);
         worker_ = std::thread([this, limits]() {
             Search::search(pos_, limits, stop_);
@@ -143,19 +154,32 @@ private:
 
     void cmd_go(std::istringstream& ss) {
         Search::Limits limits;
+        bool sawClock = false;
         std::string token;
         while (ss >> token) {
-            if      (token == "wtime")     ss >> limits.time[WHITE];
-            else if (token == "btime")     ss >> limits.time[BLACK];
-            else if (token == "winc")      ss >> limits.inc[WHITE];
-            else if (token == "binc")      ss >> limits.inc[BLACK];
+            if      (token == "wtime")     { ss >> limits.time[WHITE]; sawClock = true; }
+            else if (token == "btime")     { ss >> limits.time[BLACK]; sawClock = true; }
+            else if (token == "winc")      { ss >> limits.inc[WHITE];  sawClock = true; }
+            else if (token == "binc")      { ss >> limits.inc[BLACK];  sawClock = true; }
             else if (token == "movestogo") ss >> limits.movestogo;
             else if (token == "depth")     ss >> limits.depth;
             else if (token == "nodes")     ss >> limits.nodes;
-            else if (token == "movetime")  ss >> limits.movetime;
+            else if (token == "movetime")  { ss >> limits.movetime; sawClock = true; }
             else if (token == "infinite")  limits.infinite = true;
             // "ponder" is accepted and ignored (no real pondering yet).
         }
+
+        // Degenerate clock (e.g. `go wtime 0 btime 0 winc 0 binc 0`): a clock
+        // was named but every field is zero and no other bound applies. Force a
+        // tiny finite budget so we always return a legal move promptly instead
+        // of searching unbounded; the time manager floors it to MIN_THINK_MS.
+        if (sawClock && !limits.infinite && limits.depth == 0 && limits.nodes == 0
+            && limits.movetime == 0
+            && limits.time[WHITE] == 0 && limits.time[BLACK] == 0
+            && limits.inc[WHITE]  == 0 && limits.inc[BLACK]  == 0) {
+            limits.movetime = 1;
+        }
+
         start_search(limits);
     }
 };
@@ -173,14 +197,17 @@ void UciLoop::run() {
             continue;
 
         if (token == "uci") {
-            std::cout << "id name " << ENGINE_NAME << ' ' << ENGINE_VERSION << '\n';
-            std::cout << "id author " << ENGINE_AUTHOR << '\n';
-            std::cout << "option name Hash type spin default " << HASH_DEFAULT
-                      << " min " << HASH_MIN << " max " << HASH_MAX << '\n';
-            std::cout << "option name Threads type spin default 1 min 1 max 1\n";
-            std::cout << "uciok" << std::endl;
+            std::ostringstream oss;
+            oss << "id name " << ENGINE_NAME << ' ' << ENGINE_VERSION << '\n'
+                << "id author " << ENGINE_AUTHOR << '\n'
+                << "option name Hash type spin default " << HASH_DEFAULT
+                << " min " << HASH_MIN << " max " << HASH_MAX << '\n'
+                << "option name Threads type spin default 1 min 1 max 1\n"
+                << "uciok\n";
+            sync_cout(oss.str());
         } else if (token == "isready") {
-            std::cout << "readyok" << std::endl;
+            // Answered while a search may be running -> must be line-atomic.
+            sync_cout("readyok\n");
         } else if (token == "setoption") {
             ensure_idle();
             cmd_setoption(ss);
@@ -217,12 +244,12 @@ void UciLoop::run() {
             Search::bench(d);
         } else if (token == "eval") {
             ensure_idle();
-            std::cout << "eval " << Eval::evaluate(pos_) << " (cp, side to move)" << std::endl;
+            sync_cout("eval " + std::to_string(Eval::evaluate(pos_)) + " (cp, side to move)\n");
         } else if (token == "d" || token == "print") {
             ensure_idle();
-            std::cout << pos_.fen() << std::endl;
+            sync_cout(pos_.fen() + "\n");
         } else {
-            std::cout << "unknown command: " << token << std::endl;
+            sync_cout("unknown command: " + token + "\n");
         }
     }
 
