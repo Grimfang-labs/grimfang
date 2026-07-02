@@ -344,6 +344,50 @@ void Position::unmake_move(Move m) {
 }
 
 // ---------------------------------------------------------------------------
+// Null move (pass) - flip side to move, drop the ep square, bump rule50.
+// No piece moves, so bitboards/mailbox are untouched; only the scalar state
+// and the Zobrist key change. Uses the same undo/history stacks as real moves.
+// ---------------------------------------------------------------------------
+void Position::do_null_move() {
+    StateInfo st;
+    st.castling = castling_;
+    st.ep       = ep_;
+    st.rule50   = rule50_;
+    st.key      = key_;
+    st.captured = NO_PIECE;
+
+    // Drop any ep component from the key (the side to move is the one that
+    // could have captured), then clear the square: en passant is only legal on
+    // the immediately following move, and that move is being skipped.
+    if (ep_ != SQ_NONE) {
+        if (ep_capturable(ep_, sideToMove_)) key_ ^= Zobrist::enpassant[file_of(ep_)];
+        ep_ = SQ_NONE;
+    }
+
+    ++rule50_;
+
+    sideToMove_ = ~sideToMove_;
+    key_ ^= Zobrist::side;
+
+    states_.push_back(st);
+    keyHistory_.push_back(key_);
+
+    assert(key_ == compute_key());
+}
+
+void Position::undo_null_move() {
+    const StateInfo st = states_.back();
+    states_.pop_back();
+    keyHistory_.pop_back();
+
+    sideToMove_ = ~sideToMove_;
+    castling_   = st.castling;
+    ep_         = st.ep;
+    rule50_     = st.rule50;
+    key_        = st.key;
+}
+
+// ---------------------------------------------------------------------------
 // Attack / legality queries
 // ---------------------------------------------------------------------------
 Bitboard Position::attackers_to(Square s, Bitboard occ) const {

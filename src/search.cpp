@@ -100,7 +100,8 @@ public:
                 break;
 
             const Value score =
-                negamax(pos, depth, -VALUE_INFINITE, VALUE_INFINITE, 0, /*pvNode=*/true);
+                negamax(pos, depth, -VALUE_INFINITE, VALUE_INFINITE, 0,
+                        /*pvNode=*/true, /*prevWasNull=*/false);
 
             const bool haveMove = pvLength_[0] > 0;
             if (aborted_) {
@@ -283,7 +284,8 @@ private:
     }
 
     // ---- Negamax alpha-beta (fail-soft) --------------------------------
-    Value negamax(Position& pos, int depth, Value alpha, Value beta, int ply, bool pvNode) {
+    Value negamax(Position& pos, int depth, Value alpha, Value beta, int ply,
+                  bool pvNode, bool prevWasNull) {
         ++nodes_;
         if (ply > seldepth_) seldepth_ = ply;
         pvLength_[ply] = ply;
@@ -299,6 +301,7 @@ private:
 
         const Key   key        = pos.key();
         const Value alphaOrig  = alpha;
+        const bool  inCheck    = pos.checkers() != 0;
 
         // ---- Transposition-table probe ---------------------------------
         TTEntry*   tte    = nullptr;
@@ -316,12 +319,42 @@ private:
                 return ttValue;
         }
 
+        // Static eval of this node (side-relative). Computed once for non-check
+        // nodes; used by null-move pruning now and by RFP next rung. Meaningless
+        // when in check, so left as VALUE_NONE there.
+        const Value staticEval = inCheck ? VALUE_NONE : Eval::evaluate(pos);
+
+        // ---- Null-move pruning -----------------------------------------
+        // If passing still fails high over beta from a reduced search, a real
+        // move almost certainly would too -- prune. Guarded against PV nodes,
+        // being in check, consecutive nulls, and zugzwang (no non-pawn material
+        // for the side to move).
+        if (!pvNode
+            && !inCheck
+            && ply > 0
+            && depth >= 3
+            && !prevWasNull
+            && pos.has_non_pawn_material(pos.side_to_move())
+            && staticEval >= beta) {
+            const int R = 3 + depth / 3;
+            pos.do_null_move();
+            const Value v = -negamax(pos, depth - 1 - R, -beta, -beta + 1, ply + 1,
+                                     /*pvNode=*/false, /*prevWasNull=*/true);
+            pos.undo_null_move();
+
+            if (aborted_)
+                return alpha;
+            if (v >= beta)
+                // A reduced search never proves a mate: don't propagate one.
+                return (v >= VALUE_MATE_IN_MAX_PLY) ? beta : v;
+        }
+
         MoveList list;
         generate_legal(pos, list);
 
         if (list.count == 0)
-            return pos.checkers() ? static_cast<Value>(-(VALUE_MATE - ply))
-                                  : VALUE_DRAW;
+            return inCheck ? static_cast<Value>(-(VALUE_MATE - ply))
+                           : VALUE_DRAW;
 
         order_moves(pos, list, ttMove, killers_.primary(ply), killers_.secondary(ply));
 
@@ -342,11 +375,14 @@ private:
             // never fire -- PVS does real work only at PV nodes, automatically.
             Value score;
             if (i == 0) {
-                score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, pvNode);
+                score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, pvNode,
+                                 /*prevWasNull=*/false);
             } else {
-                score = -negamax(pos, depth - 1, -alpha - 1, -alpha, ply + 1, /*pvNode=*/false);
+                score = -negamax(pos, depth - 1, -alpha - 1, -alpha, ply + 1,
+                                 /*pvNode=*/false, /*prevWasNull=*/false);
                 if (score > alpha && score < beta)
-                    score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, pvNode);
+                    score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, pvNode,
+                                     /*prevWasNull=*/false);
             }
 
             pos.unmake_move(m);

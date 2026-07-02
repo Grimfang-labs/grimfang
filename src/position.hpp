@@ -44,6 +44,13 @@ public:
     void make_move(Move m);
     void unmake_move(Move m);
 
+    // Null move (pass): flip the side to move, clear the ep square, bump the
+    // halfmove clock, and update the Zobrist key. Pushes the same undo/history
+    // stacks a real move does so repetition detection stays consistent. Only
+    // legal to call when the side to move is NOT in check.
+    void do_null_move();
+    void undo_null_move();
+
     // -- Board queries -----------------------------------------------------
     Bitboard pieces() const { return byColor_[WHITE] | byColor_[BLACK]; }
     Bitboard pieces(Color c) const { return byColor_[c]; }
@@ -57,6 +64,13 @@ public:
     Piece  piece_on(Square s) const { return board_[s]; }
     bool   empty(Square s) const { return board_[s] == NO_PIECE; }
     Square king_sq(Color c) const { return lsb(pieces(c, KING)); }
+
+    // True when `c` has at least one non-pawn, non-king piece (N/B/R/Q). Used
+    // as the zugzwang guard for null-move pruning.
+    bool has_non_pawn_material(Color c) const {
+        return (byColor_[c] & (byType_[KNIGHT] | byType_[BISHOP]
+                             | byType_[ROOK]   | byType_[QUEEN])) != 0;
+    }
 
     Color          side_to_move() const { return sideToMove_; }
     Square         ep_square() const { return ep_; }
