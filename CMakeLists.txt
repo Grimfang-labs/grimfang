@@ -57,7 +57,8 @@ add_library(stockwolf_core STATIC
   src/tt.cpp
   src/search.cpp
   src/timeman.cpp
-  src/uci.cpp)
+  src/uci.cpp
+  src/datagen.cpp)
 
 find_package(Threads REQUIRED)
 

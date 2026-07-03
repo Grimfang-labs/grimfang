@@ -14,3 +14,6 @@
 config.json
 *.sqlite3
 *.log
+
+# NNUE datagen shards (generated locally)
+/data/

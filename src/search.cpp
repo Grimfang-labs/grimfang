@@ -515,6 +515,19 @@ Search::Result Search::search_fixed(Position& pos, int depth) {
     return search_fixed(pos, depth, never);
 }
 
+Search::Result Search::search_nodes(Position& pos, std::uint64_t nodeLimit,
+                                    std::atomic<bool>& stop) {
+    Searcher s(stop);
+    Search::Limits limits;
+    limits.nodes = nodeLimit;
+    return s.iterate(pos, limits, /*printInfo=*/false);
+}
+
+Search::Result Search::search_nodes(Position& pos, std::uint64_t nodeLimit) {
+    std::atomic<bool> never{ false };
+    return search_nodes(pos, nodeLimit, never);
+}
+
 namespace {
 
 // Fixed, reproducible bench set: the Stage 1 perft positions plus a handful of
