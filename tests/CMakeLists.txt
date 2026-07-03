@@ -17,6 +17,7 @@ add_executable(stockwolf_tests
   killers_tests.cpp
   history_tests.cpp
   nullmove_tests.cpp
+  lmr_tests.cpp
   uci_tests.cpp)
 target_link_libraries(stockwolf_tests PRIVATE stockwolf_core Catch2::Catch2WithMain)
 

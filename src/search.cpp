@@ -46,6 +46,11 @@ constexpr int TT_MOVE_BONUS   = 10'000'000;   // root previous-best move
 constexpr int RFP_MAX_DEPTH = 8;
 constexpr int RFP_MARGIN    = 100;   // centipawns per ply of remaining depth
 
+// Late move reductions: search late quiet moves at reduced depth first, verify
+// at full depth if the reduced scout beats alpha (PVS re-search unchanged).
+constexpr int LMR_MIN_DEPTH      = 3;
+constexpr int LMR_MIN_MOVE_INDEX   = 3;   // 0-based: 4th move onward
+
 // Poll the stop conditions roughly every this many nodes.
 constexpr std::uint64_t POLL_INTERVAL = 2048;
 
@@ -383,25 +388,57 @@ private:
 
         for (int i = 0; i < list.count; ++i) {
             const Move m = list.moves[i];
-            pos.make_move(m);
+            const int  newDepth = depth - 1;
 
-            // Principal Variation Search: trust the move ordering. The first
-            // move gets the full window; later moves get a null-window scout
-            // (a non-PV child). A scout that lands strictly inside (alpha, beta)
-            // refutes the ordering assumption for that move, so re-search it at
-            // the SAME depth with the full window (a PV child). PVS changes the
-            // node count, not the result. At non-PV nodes beta == alpha + 1, so
-            // the scout window equals the full window and the re-search can
-            // never fire -- PVS does real work only at PV nodes, automatically.
+            // Pre-move classification (parent position).
+            const bool isQuiet  = is_quiet_move(pos, m);
+            const bool isTtMove = ttMove.is_ok() && m == ttMove;
+            const Move k1       = killers_.primary(ply);
+            const Move k2       = killers_.secondary(ply);
+            const bool isKiller = (m == k1 || m == k2);
+
+            pos.make_move(m);
+            const bool givesCheck = pos.checkers() != 0;
+
+            // Principal Variation Search + late move reductions. The first move
+            // gets the full window; later moves get a null-window scout (a non-PV
+            // child). LMR inserts a reduced-depth probe before the full-depth
+            // scout when eligible; when R==0 the path is identical to pre-LMR PVS.
+            // A scout that lands strictly inside (alpha, beta) is re-searched at
+            // full depth with the full window (a PV child).
             Value score;
             if (i == 0) {
-                score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, pvNode,
+                score = -negamax(pos, newDepth, -beta, -alpha, ply + 1, pvNode,
                                  /*prevWasNull=*/false);
             } else {
-                score = -negamax(pos, depth - 1, -alpha - 1, -alpha, ply + 1,
-                                 /*pvNode=*/false, /*prevWasNull=*/false);
+                int R = 0;
+                if (depth >= LMR_MIN_DEPTH
+                    && i >= LMR_MIN_MOVE_INDEX
+                    && isQuiet
+                    && !isTtMove
+                    && !inCheck
+                    && !givesCheck) {
+                    R = 1;
+                    if (depth >= 6) R += 1;
+                    if (i >= 12)     R += 1;
+                    if (pvNode)      R = std::max(R - 1, 0);
+                    if (isKiller)    R = std::max(R - 1, 0);
+                    R = std::min(R, newDepth - 1);
+                }
+
+                if (R > 0) {
+                    score = -negamax(pos, newDepth - R, -alpha - 1, -alpha, ply + 1,
+                                     /*pvNode=*/false, /*prevWasNull=*/false);
+                    if (score > alpha)
+                        score = -negamax(pos, newDepth, -alpha - 1, -alpha, ply + 1,
+                                         /*pvNode=*/false, /*prevWasNull=*/false);
+                } else {
+                    score = -negamax(pos, newDepth, -alpha - 1, -alpha, ply + 1,
+                                     /*pvNode=*/false, /*prevWasNull=*/false);
+                }
+
                 if (score > alpha && score < beta)
-                    score = -negamax(pos, depth - 1, -beta, -alpha, ply + 1, pvNode,
+                    score = -negamax(pos, newDepth, -beta, -alpha, ply + 1, pvNode,
                                      /*prevWasNull=*/false);
             }
 
