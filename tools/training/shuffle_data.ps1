@@ -3,31 +3,34 @@
     Shuffle the ChessBoard training file (REQUIRED before training).
 
 .DESCRIPTION
-    DirectSequentialDataLoader reads sequentially — game-ordered data must be
+    DirectSequentialDataLoader reads sequentially - game-ordered data must be
     shuffled first via bullet-utils. Uses external-memory shuffle for the full
     ~10 GB file (split + interleave when mem budget is exceeded).
 #>
 [CmdletBinding()]
 param(
     [string] $BulletRoot = 'C:\Users\shywolf91\Dev\StockWolf\bullet',
-    [string] $Input  = 'tools\data\train.bulletdata',
-    [string] $Output = 'tools\data\train_shuffled.bulletdata',
+    [string] $InFile  = 'tools\data\train.bulletdata',
+    [string] $OutFile = 'tools\data\train_shuffled.bulletdata',
     [int]    $MemUsedMb = 8192
 )
 
 $ErrorActionPreference = 'Stop'
 $StockWolfRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$utils = Join-Path $BulletRoot 'target\release\bullet-utils.exe'
+$targetDir = Join-Path $BulletRoot 'target'
+$env:CARGO_TARGET_DIR = $targetDir
+$utils = Join-Path $targetDir 'release\bullet-utils.exe'
 
 if (-not (Test-Path -LiteralPath $utils)) {
     Write-Host "Building bullet-utils (no CUDA required)..." -ForegroundColor Cyan
     Push-Location $BulletRoot
     cargo build -r --package bullet-utils
+    if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
     Pop-Location
 }
 
-$inPath  = Join-Path $StockWolfRoot $Input
-$outPath = Join-Path $StockWolfRoot $Output
+$inPath  = Join-Path $StockWolfRoot $InFile
+$outPath = Join-Path $StockWolfRoot $OutFile
 
 if (-not (Test-Path -LiteralPath $inPath)) {
     throw "input not found: $inPath"
