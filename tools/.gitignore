@@ -17,3 +17,4 @@ config.json
 
 # NNUE datagen shards (generated locally)
 /data/
+*.bulletdata
