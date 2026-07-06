@@ -31,6 +31,7 @@ Write-Host "=== Smoke run: 1 superbatch (~100M positions) ===" -ForegroundColor 
 Write-Host "Monitor GPU: nvidia-smi -l 1" -ForegroundColor Yellow
 
 Push-Location $BulletRoot
+$env:CARGO_TARGET_DIR = Join-Path $BulletRoot 'target'
 $env:STOCKWOLF_DATA = $data
 $env:STOCKWOLF_OUTPUT_DIR = 'checkpoints_smoke'
 $env:STOCKWOLF_END_SB = '1'

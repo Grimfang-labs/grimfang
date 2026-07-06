@@ -30,7 +30,8 @@ Write-Host "Command:" -ForegroundColor Yellow
 Write-Host @"
 
   cd '$BulletRoot'
-  `$env:CUDA_PATH = '$env:CUDA_PATH'
+  `$env:CUDA_PATH = '<your CUDA toolkit path>'
+  `$env:CARGO_TARGET_DIR = '$BulletRoot\target'
   `$env:STOCKWOLF_DATA = '$shuffled'
   `$env:STOCKWOLF_OUTPUT_DIR = 'checkpoints'
   `$env:STOCKWOLF_END_SB = '$EndSuperbatch'
