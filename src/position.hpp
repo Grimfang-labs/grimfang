@@ -6,6 +6,7 @@
 #include "attacks.hpp"
 #include "bitboard.hpp"
 #include "move.hpp"
+#include "nnue.hpp"
 #include "types.hpp"
 #include "zobrist.hpp"
 
@@ -78,6 +79,7 @@ public:
     int            halfmove_clock() const { return rule50_; }
     int            fullmove_number() const { return fullMove_; }
     Key            key() const { return key_; }
+    const nnue::AccumulatorPair& nnue_accumulators() const { return nnueAccumulators_; }
 
     bool can_castle(CastlingRights cr) const { return (castling_ & cr) != 0; }
 
@@ -129,8 +131,10 @@ private:
     int            rule50_;
     int            fullMove_;
     Key            key_;
+    nnue::AccumulatorPair nnueAccumulators_;
 
     std::vector<StateInfo> states_;
+    std::vector<nnue::AccumulatorPair> nnueHistory_;
 
     // Zobrist keys of every position reached since game setup (back() == key_).
     // Seeded by set_fen and grown/shrunk by make/unmake so repetition detection

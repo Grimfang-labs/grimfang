@@ -1,6 +1,7 @@
 #include "position.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cctype>
 #include <sstream>
@@ -91,7 +92,9 @@ void Position::clear() {
     rule50_     = 0;
     fullMove_   = 1;
     key_        = 0;
+    nnueAccumulators_ = {};
     states_.clear();
+    nnueHistory_.clear();
     keyHistory_.clear();
 }
 
@@ -156,6 +159,7 @@ void Position::set_fen(const std::string& fen) {
     if (ep_capturable(ep_, sideToMove_)) key_ ^= Zobrist::enpassant[file_of(ep_)];
 
     // Seed the repetition history with the root position.
+    nnue::refresh(nnueAccumulators_, *this);
     keyHistory_.push_back(key_);
 }
 
@@ -229,6 +233,15 @@ void Position::make_move(Move m) {
     st.key      = key_;          // exact pre-move key for restore
     st.captured = NO_PIECE;
 
+    nnueHistory_.push_back(nnueAccumulators_);
+    nnue::AccumulatorPair nextAcc = nnueAccumulators_;
+
+    std::array<nnue::FeatureDelta, 4> deltas {};
+    std::size_t deltaCount = 0;
+    const auto push_delta = [&](Piece piece, Square sq, bool add) {
+        deltas[deltaCount++] = nnue::FeatureDelta { piece, sq, add };
+    };
+
     // Remove any current ep file from the key (re-added below on a new double
     // push). The side to move is the one that could have captured, so the same
     // capturability test that added the component now removes it.
@@ -243,10 +256,12 @@ void Position::make_move(Move m) {
     if (mt == EN_PASSANT) {
         const Square capSq = to - pawn_push(us);   // the pawn behind 'to'
         st.captured = board_[capSq];
+        push_delta(st.captured, capSq, false);
         remove_piece(capSq);
         rule50_ = 0;
     } else if (board_[to] != NO_PIECE) {
         st.captured = board_[to];
+        push_delta(st.captured, to, false);
         remove_piece(to);
         rule50_ = 0;
     }
@@ -260,16 +275,22 @@ void Position::make_move(Move m) {
                                          : static_cast<Square>(to - 2);
         const Square rookTo   = kingSide ? static_cast<Square>(to - 1)
                                          : static_cast<Square>(to + 1);
+        push_delta(board_[rookFrom], rookFrom, false);
+        push_delta(board_[rookFrom], rookTo, true);
         move_piece(rookFrom, rookTo);
     }
 
     // ---- Move the moving piece ------------------------------------------
+    push_delta(pc, from, false);
     move_piece(from, to);
 
     // ---- Promotion: swap the pawn for the promoted piece ----------------
     if (mt == PROMOTION) {
+        push_delta(make_piece(us, m.promotion_type()), to, true);
         remove_piece(to);
         put_piece(make_piece(us, m.promotion_type()), to);
+    } else {
+        push_delta(pc, to, true);
     }
 
     // ---- New ep square on a pawn double push ----------------------------
@@ -294,15 +315,24 @@ void Position::make_move(Move m) {
     key_ ^= Zobrist::side;
     if (us == BLACK) ++fullMove_;
 
+    nnue::update(nextAcc, std::span<const nnue::FeatureDelta>(deltas.data(), deltaCount));
+    nnueAccumulators_ = nextAcc;
     states_.push_back(st);
     keyHistory_.push_back(key_);
 
+#if defined(NNUE_INCREMENTAL_CHECK)
+    nnue::AccumulatorPair scratch;
+    nnue::refresh(scratch, *this);
+    assert(scratch.byPerspective == nnueAccumulators_.byPerspective);
+#endif
     assert(key_ == compute_key());
 }
 
 void Position::unmake_move(Move m) {
     const StateInfo st = states_.back();
     states_.pop_back();
+    nnueAccumulators_ = nnueHistory_.back();
+    nnueHistory_.pop_back();
     keyHistory_.pop_back();
 
     sideToMove_ = ~sideToMove_;        // back to the mover
@@ -366,6 +396,7 @@ void Position::do_null_move() {
 
     ++rule50_;
 
+    nnueHistory_.push_back(nnueAccumulators_);
     sideToMove_ = ~sideToMove_;
     key_ ^= Zobrist::side;
 
@@ -378,6 +409,8 @@ void Position::do_null_move() {
 void Position::undo_null_move() {
     const StateInfo st = states_.back();
     states_.pop_back();
+    nnueAccumulators_ = nnueHistory_.back();
+    nnueHistory_.pop_back();
     keyHistory_.pop_back();
 
     sideToMove_ = ~sideToMove_;

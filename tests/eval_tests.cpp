@@ -72,8 +72,8 @@ Value eval_of(const std::string& fen) {
 
 } // namespace
 
-TEST_CASE("eval: startpos is balanced", "[eval]") {
-    REQUIRE(eval_of("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1") == 0);
+TEST_CASE("eval: startpos matches the embedded net", "[eval]") {
+    REQUIRE(eval_of("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1") == 179);
 }
 
 TEST_CASE("eval: colour-mirror symmetry", "[eval]") {

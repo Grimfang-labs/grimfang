@@ -3,11 +3,11 @@
 #include "score.hpp"
 
 // ===========================================================================
-// eval.hpp - static position evaluation.
+// eval.hpp - search-facing static evaluation entry point.
 //
-// Tapered material + piece-square tables (PeSTO starting constants). The score
-// is returned from the side-to-move's perspective (positive = good for the
-// side to move), which is mandatory for negamax.
+// The engine now uses the embedded NNUE net for all static evaluations. The
+// return value remains side-to-move relative centipawns so the search code's
+// negamax sign convention is unchanged.
 // ===========================================================================
 
 class Position;

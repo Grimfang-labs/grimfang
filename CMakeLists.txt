@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.20)
 
 project(stockwolf LANGUAGES CXX)
 
+set(STOCKWOLF_NET_BIN "${CMAKE_CURRENT_SOURCE_DIR}/tools/training/stockwolf-net-001.bin")
+set(STOCKWOLF_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(STOCKWOLF_EMBEDDED_NET_CPP "${STOCKWOLF_GENERATED_DIR}/stockwolf_net_001.cpp")
+
 # ---------------------------------------------------------------------------
 # Global C++ settings
 # ---------------------------------------------------------------------------
@@ -54,16 +58,28 @@ add_library(stockwolf_core STATIC
   src/movegen.cpp
   src/perft.cpp
   src/eval.cpp
+  src/nnue.cpp
   src/tt.cpp
   src/search.cpp
   src/timeman.cpp
   src/uci.cpp
-  src/datagen.cpp)
+  src/datagen.cpp
+  ${STOCKWOLF_EMBEDDED_NET_CPP})
 
 find_package(Threads REQUIRED)
 
 target_include_directories(stockwolf_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(stockwolf_core PUBLIC stockwolf_flags Threads::Threads)
+target_compile_definitions(stockwolf_core PRIVATE $<$<CONFIG:Debug>:NNUE_INCREMENTAL_CHECK=1>)
+
+add_custom_command(
+  OUTPUT ${STOCKWOLF_EMBEDDED_NET_CPP}
+  COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_binary.ps1
+    -InputFile ${STOCKWOLF_NET_BIN}
+    -OutputFile ${STOCKWOLF_EMBEDDED_NET_CPP}
+  DEPENDS ${STOCKWOLF_NET_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_binary.ps1
+  VERBATIM)
 
 # ---------------------------------------------------------------------------
 # Engine executable

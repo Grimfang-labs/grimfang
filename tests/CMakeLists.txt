@@ -10,6 +10,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Catch2)
 
 add_executable(stockwolf_tests
+  nnue_tests.cpp
   perft_tests.cpp
   eval_tests.cpp
   search_tests.cpp
