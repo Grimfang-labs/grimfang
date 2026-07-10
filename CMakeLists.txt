@@ -33,11 +33,16 @@ if(MSVC)
   target_compile_options(stockwolf_flags INTERFACE
     $<$<CONFIG:Release>:/O2>
     $<$<CONFIG:RelWithDebInfo>:/O2>)
+  # AVX2 for the NNUE SIMD inference/accumulator paths (all configs: the Debug
+  # test build exercises the SIMD path under NNUE_INCREMENTAL_CHECK). Defines
+  # __AVX2__ so the compile-time guard in nnue.cpp selects the vectorized path.
+  target_compile_options(stockwolf_flags INTERFACE /arch:AVX2)
 else()
   target_compile_options(stockwolf_flags INTERFACE -Wall -Wextra -Wshadow)
   target_compile_options(stockwolf_flags INTERFACE
     $<$<CONFIG:Release>:-O3>
     $<$<CONFIG:RelWithDebInfo>:-O2>)
+  target_compile_options(stockwolf_flags INTERFACE -mavx2)
 endif()
 
 if(USE_PEXT)

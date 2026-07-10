@@ -53,4 +53,10 @@ void refresh(AccumulatorPair& acc, const Position& pos);
 void update(AccumulatorPair& acc, std::span<const FeatureDelta> deltas);
 Value evaluate(const Position& pos);
 
+// Retained scalar reference paths. `evaluate`/`refresh` above use AVX2 when
+// available (see nnue.cpp); these always compute with the scalar integer math
+// so tests can assert the vectorized path is bit-identical.
+Value evaluate_scalar(const Position& pos);
+void refresh_scalar(AccumulatorPair& acc, const Position& pos);
+
 } // namespace nnue
