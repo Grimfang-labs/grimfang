@@ -22,7 +22,7 @@
         "enabled": false
     },
     "opening": {
-        "file": "C:\\Users\\shywolf91\\Dev\\StockWolf\\stockwolf\\tools\\books\\8moves_v3.epd",
+        "file": "C:\\Users\\shywolf91\\dev\\StockWolf\\stockwolf\\tools\\books\\8moves_v3.epd",
         "format": 0,
         "order": 0,
         "plies": -1,
@@ -54,13 +54,13 @@
         "alpha": 0.05,
         "beta": 0.05,
         "elo0": 0.0,
-        "elo1": 5.0,
+        "elo1": 8.0,
         "model": "normalized",
         "enabled": true
     },
     "config_name": "config.json",
     "output": 0,
-    "seed": 16783787746773587693,
+    "seed": 16038258875601021422,
     "variant": 0,
     "type": 0,
     "gauntlet_seeds": 1,
@@ -79,7 +79,7 @@
     "affinity": false,
     "show_latency": false,
     "log": {
-        "file": "",
+        "file": "tools/fastchess.log",
         "level": 2,
         "append_file": true,
         "compress": false,
@@ -90,7 +90,7 @@
         {
             "name": "new",
             "dir": "",
-            "cmd": "C:\\Users\\shywolf91\\Dev\\StockWolf\\stockwolf\\tools\\stockwolf-pvs.exe",
+            "cmd": "C:\\Users\\shywolf91\\dev\\StockWolf\\stockwolf\\tools\\stockwolf-nnue.exe",
             "args": "",
             "restart": false,
             "options": [
@@ -119,7 +119,7 @@
         {
             "name": "base",
             "dir": "",
-            "cmd": "C:\\Users\\shywolf91\\Dev\\StockWolf\\stockwolf\\tools\\stockwolf-base.exe",
+            "cmd": "C:\\Users\\shywolf91\\dev\\StockWolf\\stockwolf\\tools\\stockwolf-base.exe",
             "args": "",
             "restart": false,
             "options": [
@@ -148,15 +148,15 @@
     ],
     "stats": {
         "new vs base": {
-            "wins": 1519,
-            "losses": 1334,
-            "draws": 971,
-            "penta_WW": 253,
-            "penta_WD": 359,
-            "penta_WL": 654,
-            "penta_DD": 147,
-            "penta_LD": 318,
-            "penta_LL": 181
+            "wins": 173,
+            "losses": 14,
+            "draws": 31,
+            "penta_WW": 70,
+            "penta_WD": 24,
+            "penta_WL": 9,
+            "penta_DD": 1,
+            "penta_LD": 5,
+            "penta_LL": 0
         }
     }
 }

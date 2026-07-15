@@ -62,11 +62,23 @@ $gamesPerShard = [Math]::Max(1, [Math]::Ceiling($Games / [double]$Parallelism))
 
 Write-Host ("Launching {0} datagen shard(s), ~{1} games each, nodes={2}" -f $Parallelism, $gamesPerShard, $Nodes) -ForegroundColor Cyan
 
-$jobs = @()
+# Quote a single argv token for ProcessStartInfo.Arguments (Win32 command line).
+function Quote-WinArg([string] $arg) {
+    if ($arg -notmatch '[\s"]') { return $arg }
+    return '"' + ($arg -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
+}
+
+# Use System.Diagnostics.Process (not Start-Process -PassThru): PassThru handles
+# often leave .ExitCode as $null, and in PowerShell `$null -ne 0` is $true, which
+# produced false "failed with exit code" throws for shards that were still
+# running (or had already succeeded). WaitForExit() on a real Process object
+# populates ExitCode reliably; only then do we inspect it.
+$workDir = (Get-Location).Path
+$procs = @()
 for ($i = 0; $i -lt $Parallelism; $i++) {
     $shardPath = Join-Path $OutDir ("shard_{0}.bin" -f $i)
     $shardSeed = $Seed + $i
-    $args = @(
+    $argList = @(
         'datagen',
         '--games', "$gamesPerShard",
         '--out', $shardPath,
@@ -76,14 +88,38 @@ for ($i = 0; $i -lt $Parallelism; $i++) {
         '--resign-score', "$ResignScore",
         '--resign-plies', "$ResignPlies"
     )
-    $jobs += Start-Process -FilePath $exePath -ArgumentList $args -NoNewWindow -PassThru -WorkingDirectory (Get-Location)
+
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $exePath
+    $psi.Arguments = ($argList | ForEach-Object { Quote-WinArg $_ }) -join ' '
+    $psi.WorkingDirectory = $workDir
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $false
+
+    $proc = [System.Diagnostics.Process]::new()
+    $proc.StartInfo = $psi
+    $proc.EnableRaisingEvents = $false
+    if (-not $proc.Start()) {
+        throw ("failed to start datagen shard {0}" -f $i)
+    }
+    $procs += $proc
 }
 
-foreach ($job in $jobs) {
-    $job.WaitForExit()
-    if ($job.ExitCode -ne 0) {
-        throw ("datagen shard pid {0} failed with exit code {1}" -f $job.Id, $job.ExitCode)
+# Phase 1: block until every shard process has fully terminated.
+foreach ($proc in $procs) {
+    $proc.WaitForExit()
+}
+
+# Phase 2: only after every wait has completed, inspect exit codes.
+foreach ($proc in $procs) {
+    if (-not $proc.HasExited) {
+        throw ("datagen shard pid {0} still running after wait" -f $proc.Id)
     }
+    $code = $proc.ExitCode
+    if ($code -ne 0) {
+        throw ("datagen shard pid {0} failed with exit code {1}" -f $proc.Id, $code)
+    }
+    $proc.Dispose()
 }
 
 $totalBytes = 0L
