@@ -1,4 +1,4 @@
-//! StockWolf datagen shard record layout (feat/datagen, version 1).
+//! Grimfang datagen shard record layout (feat/datagen, version 1).
 
 pub const RECORD_SIZE: usize = 74;
 pub const VERSION: u8 = 1;

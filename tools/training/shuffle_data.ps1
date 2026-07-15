@@ -9,14 +9,14 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $BulletRoot = 'C:\Users\shywolf91\Dev\StockWolf\bullet',
+    [string] $BulletRoot = 'C:\Users\shywolf91\Dev\Grimfang\bullet',
     [string] $InFile  = 'tools\data\train.bulletdata',
     [string] $OutFile = 'tools\data\train_shuffled.bulletdata',
     [int]    $MemUsedMb = 8192
 )
 
 $ErrorActionPreference = 'Stop'
-$StockWolfRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$GrimfangRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $targetDir = Join-Path $BulletRoot 'target'
 $env:CARGO_TARGET_DIR = $targetDir
 $utils = Join-Path $targetDir 'release\bullet-utils.exe'
@@ -29,8 +29,8 @@ if (-not (Test-Path -LiteralPath $utils)) {
     Pop-Location
 }
 
-$inPath  = Join-Path $StockWolfRoot $InFile
-$outPath = Join-Path $StockWolfRoot $OutFile
+$inPath  = Join-Path $GrimfangRoot $InFile
+$outPath = Join-Path $GrimfangRoot $OutFile
 
 if (-not (Test-Path -LiteralPath $inPath)) {
     throw "input not found: $inPath"

@@ -22,7 +22,7 @@
         "enabled": false
     },
     "opening": {
-        "file": "C:\\Users\\shywolf91\\dev\\StockWolf\\stockwolf\\tools\\books\\8moves_v3.epd",
+        "file": "C:\\Users\\shywolf91\\dev\\Grimfang\\grimfang\\tools\\books\\8moves_v3.epd",
         "format": 0,
         "order": 0,
         "plies": -1,
@@ -90,7 +90,7 @@
         {
             "name": "new",
             "dir": "",
-            "cmd": "C:\\Users\\shywolf91\\dev\\StockWolf\\stockwolf\\tools\\stockwolf-nnue.exe",
+            "cmd": "C:\\Users\\shywolf91\\dev\\Grimfang\\grimfang\\tools\\grimfang-nnue.exe",
             "args": "",
             "restart": false,
             "options": [
@@ -119,7 +119,7 @@
         {
             "name": "base",
             "dir": "",
-            "cmd": "C:\\Users\\shywolf91\\dev\\StockWolf\\stockwolf\\tools\\stockwolf-base.exe",
+            "cmd": "C:\\Users\\shywolf91\\dev\\Grimfang\\grimfang\\tools\\grimfang-base.exe",
             "args": "",
             "restart": false,
             "options": [

@@ -7,7 +7,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $BulletRoot = 'C:\Users\shywolf91\Dev\StockWolf\bullet',
+    [string] $BulletRoot = 'C:\Users\shywolf91\Dev\Grimfang\bullet',
     [int]    $EndSuperbatch = 35
 )
 
@@ -32,12 +32,12 @@ Write-Host @"
   cd '$BulletRoot'
   `$env:CUDA_PATH = '<your CUDA toolkit path>'
   `$env:CARGO_TARGET_DIR = '$BulletRoot\target'
-  `$env:STOCKWOLF_DATA = '$shuffled'
-  `$env:STOCKWOLF_OUTPUT_DIR = 'checkpoints'
-  `$env:STOCKWOLF_END_SB = '$EndSuperbatch'
-  cargo run -r --features cuda --example stockwolf_net001
+  `$env:GRIMFANG_DATA = '$shuffled'
+  `$env:GRIMFANG_OUTPUT_DIR = 'checkpoints'
+  `$env:GRIMFANG_END_SB = '$EndSuperbatch'
+  cargo run -r --features cuda --example grimfang_net001
 
 "@ -ForegroundColor White
 
 Write-Host "After training, copy final quantised net:" -ForegroundColor Yellow
-Write-Host "  checkpoints/stockwolf-net-001-$EndSuperbatch/quantised.bin -> stockwolf-net-001.bin" -ForegroundColor White
+Write-Host "  checkpoints/grimfang-net-001-$EndSuperbatch/quantised.bin -> grimfang-net-001.bin" -ForegroundColor White

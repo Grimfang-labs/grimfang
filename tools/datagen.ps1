@@ -30,11 +30,11 @@
     Random opening plies (default 8).
 
 .EXAMPLE
-    ./tools/datagen.ps1 -Exe build/Release/stockwolf.exe -Games 1000
+    ./tools/datagen.ps1 -Exe build/Release/grimfang.exe -Games 1000
 #>
 [CmdletBinding()]
 param(
-    [string] $Exe           = 'build/Release/stockwolf.exe',
+    [string] $Exe           = 'build/Release/grimfang.exe',
     [int]    $Games         = 100,
     [string] $OutDir         = 'tools/data',
     [int]    $Parallelism   = 0,

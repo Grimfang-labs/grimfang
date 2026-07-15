@@ -2,7 +2,7 @@
 name = "convert"
 version = "0.1.0"
 edition = "2021"
-description = "Convert StockWolf datagen shards to bullet ChessBoard training data"
+description = "Convert Grimfang datagen shards to bullet ChessBoard training data"
 
 [lib]
 name = "convert"

@@ -1,4 +1,4 @@
-# StockWolf testing harness (Stage 3)
+# Grimfang testing harness (Stage 3)
 
 This directory holds the SPRT gate for Stage 3 — the strength ladder. Every Elo
 claim is decided by **real engine-vs-engine games** (NEW build vs a frozen BASE
@@ -36,11 +36,11 @@ Corollaries:
    - Keep unbalanced books (UHO_*, Pohl.epd) for *later* when the engine is much
      stronger — they over-separate weak engines and bias results now.
 3. **Freeze a baseline binary.** Build Release from current `main` and copy it
-   aside as `tools/stockwolf-base.exe`. Every SPRT compares NEW vs this frozen
+   aside as `tools/grimfang-base.exe`. Every SPRT compares NEW vs this frozen
    baseline. When a feature passes and merges, rebuild the baseline from the new
    `main` so the baseline advances one rung.
 
-`tools/fastchess.exe`, `tools/stockwolf-base.exe`, `tools/books/*`, and
+`tools/fastchess.exe`, `tools/grimfang-base.exe`, `tools/books/*`, and
 `tools/out.pgn` are intentionally git-ignored (see `tools/.gitignore`).
 
 ## Building NEW
@@ -49,8 +49,8 @@ Release build of the engine (the candidate). From the repo root, on Windows:
 
 ```powershell
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release --target stockwolf
-# -> build/Release/stockwolf.exe   (single-config generators: build/stockwolf.exe)
+cmake --build build --config Release --target grimfang
+# -> build/Release/grimfang.exe   (single-config generators: build/grimfang.exe)
 ```
 
 The same `bench` signature must come out of an optimized build; debug builds
@@ -60,7 +60,7 @@ builds.
 ## Reproducibility guard — run this before every SPRT
 
 ```powershell
-./tools/bench_check.ps1 -Exe build/Release/stockwolf.exe
+./tools/bench_check.ps1 -Exe build/Release/grimfang.exe
 ```
 
 Runs `bench` twice and asserts the node counts match. A deterministic search
@@ -79,7 +79,7 @@ For a pure refactor, also assert the signature is unchanged:
 ### STC (default — iterate here)
 
 ```powershell
-./tools/sprt.ps1 -New build/Release/stockwolf.exe -Base tools/stockwolf-base.exe
+./tools/sprt.ps1 -New build/Release/grimfang.exe -Base tools/grimfang-base.exe
 ```
 
 Defaults: `tc=8+0.08`, book `tools/books/8moves_v3.epd` (epd), `elo0=0 elo1=5
@@ -89,7 +89,7 @@ alpha=0.05 beta=0.05`, `rounds=20000 -repeat`, `concurrency=10`, `Hash=16`,
 ### LTC (confirm depth-scaling features: 3.6 NMP, 3.7 RFP, 3.8 LMR)
 
 ```powershell
-./tools/sprt.ps1 -New NEW.exe -Base tools/stockwolf-base.exe -Tc 40+0.4 -Elo1 8
+./tools/sprt.ps1 -New NEW.exe -Base tools/grimfang-base.exe -Tc 40+0.4 -Elo1 8
 ```
 
 ### Wider H1 bound for big-swing features
@@ -97,7 +97,7 @@ alpha=0.05 beta=0.05`, `rounds=20000 -repeat`, `concurrency=10`, `Hash=16`,
 NMP / RFP / LMR use `[0, 8]`; everything else uses `[0, 5]`:
 
 ```powershell
-./tools/sprt.ps1 -New NEW.exe -Base tools/stockwolf-base.exe -Elo1 8
+./tools/sprt.ps1 -New NEW.exe -Base tools/grimfang-base.exe -Elo1 8
 ```
 
 bash equivalents live in `tools/sprt.sh` (same flags, `-new/-base/-tc/...`).
@@ -119,7 +119,7 @@ fastchess -engine cmd=NEW name=new -engine cmd=BASE name=base ^
 Run NEW == BASE — the *same binary* on both sides:
 
 ```powershell
-./tools/sprt.ps1 -New tools/stockwolf-base.exe -Base tools/stockwolf-base.exe
+./tools/sprt.ps1 -New tools/grimfang-base.exe -Base tools/grimfang-base.exe
 ```
 
 Expected: the LLR drifts toward the **lower** bound and the test **rejects** (no
@@ -158,7 +158,7 @@ git-ignored via `tools/.gitignore`). Attach it when reporting a crash.
 Quick teardown/degenerate-clock smoke test (independent of an SPRT run):
 
 ```powershell
-./tools/reliability_check.ps1 -Exe build/Release/stockwolf.exe
+./tools/reliability_check.ps1 -Exe build/Release/grimfang.exe
 ```
 
 It spawns the engine hundreds of times and kills the `go`/`stop`/`quit`
@@ -185,10 +185,10 @@ asserting: process always exits 0, exactly one `bestmove` per `go`, no hang.
 1. `git checkout -b feat/<name>`
 2. Implement **only** that feature (+ any unit test it warrants).
 3. Build Release as NEW; run `tools/bench_check.ps1 NEW` (reproducible).
-4. `tools/sprt.ps1 -New NEW -Base tools/stockwolf-base.exe` (STC).
+4. `tools/sprt.ps1 -New NEW -Base tools/grimfang-base.exe` (STC).
    For 3.6 / 3.7 / 3.8 also run an LTC confirmation (`-Tc 40+0.4`).
 5. **LLR ≥ upper** → merge to `main`, record the new bench number in the commit,
-   and rebuild `tools/stockwolf-base.exe` from the new `main` (baseline advances).
+   and rebuild `tools/grimfang-base.exe` from the new `main` (baseline advances).
    **LLR ≤ lower** → discard the branch. Inconclusive → extend or discard.
 6. Next rung.
 

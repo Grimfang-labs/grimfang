@@ -9,7 +9,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Catch2)
 
-add_executable(stockwolf_tests
+add_executable(grimfang_tests
   nnue_tests.cpp
   perft_tests.cpp
   eval_tests.cpp
@@ -21,19 +21,19 @@ add_executable(stockwolf_tests
   lmr_tests.cpp
   datagen_tests.cpp
   uci_tests.cpp)
-target_link_libraries(stockwolf_tests PRIVATE stockwolf_core Catch2::Catch2WithMain)
+target_link_libraries(grimfang_tests PRIVATE grimfang_core Catch2::Catch2WithMain)
 
 # The UCI conformance test drives the real engine binary, so build it first and
 # pass its path in.
-add_dependencies(stockwolf_tests stockwolf)
+add_dependencies(grimfang_tests grimfang)
 
 # Pass the path to the bundled EPD suite to the tests.
-target_compile_definitions(stockwolf_tests PRIVATE
+target_compile_definitions(grimfang_tests PRIVATE
   PERFT_EPD_PATH="${CMAKE_CURRENT_SOURCE_DIR}/perft_suite.epd"
-  STOCKWOLF_ENGINE="$<TARGET_FILE:stockwolf>")
+  GRIMFANG_ENGINE="$<TARGET_FILE:grimfang>")
 
 # Register two ctest entries via Catch2 tag specs so CI can run only the fast
 # gate. The slow entry is also labelled "slow" for `ctest -L/-LE slow`.
-add_test(NAME stockwolf_fast COMMAND stockwolf_tests "~[slow]")
-add_test(NAME stockwolf_slow COMMAND stockwolf_tests "[slow]")
-set_tests_properties(stockwolf_slow PROPERTIES LABELS "slow")
+add_test(NAME grimfang_fast COMMAND grimfang_tests "~[slow]")
+add_test(NAME grimfang_slow COMMAND grimfang_tests "[slow]")
+set_tests_properties(grimfang_slow PROPERTIES LABELS "slow")

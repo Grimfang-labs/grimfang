@@ -26,11 +26,11 @@
     Per-iteration hang guard in milliseconds (default 5000).
 
 .EXAMPLE
-    ./tools/reliability_check.ps1 -Exe build/Release/stockwolf.exe
+    ./tools/reliability_check.ps1 -Exe build/Release/grimfang.exe
 #>
 [CmdletBinding()]
 param(
-    [string] $Exe        = 'build/Release/stockwolf.exe',
+    [string] $Exe        = 'build/Release/grimfang.exe',
     [int]    $Iterations = 200,
     [int]    $TimeoutMs  = 5000
 )

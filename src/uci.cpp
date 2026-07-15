@@ -27,9 +27,8 @@
 
 namespace {
 
-constexpr char ENGINE_NAME[]    = "StockWolf";
-constexpr char ENGINE_VERSION[] = "2.0";
-constexpr char ENGINE_AUTHOR[]  = "shywolf91";
+constexpr char ENGINE_NAME[]   = "Grimfang";
+constexpr char ENGINE_AUTHOR[] = "shywolf91";
 
 // Hash UCI option bounds (MB).
 constexpr int HASH_DEFAULT = 16;
@@ -198,7 +197,7 @@ void UciLoop::run() {
 
         if (token == "uci") {
             std::ostringstream oss;
-            oss << "id name " << ENGINE_NAME << ' ' << ENGINE_VERSION << '\n'
+            oss << "id name " << ENGINE_NAME << '\n'
                 << "id author " << ENGINE_AUTHOR << '\n'
                 << "option name Hash type spin default " << HASH_DEFAULT
                 << " min " << HASH_MIN << " max " << HASH_MAX << '\n'

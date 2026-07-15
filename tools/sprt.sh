@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# sprt.sh - run an engine-vs-engine SPRT of a NEW StockWolf build against a
+# sprt.sh - run an engine-vs-engine SPRT of a NEW Grimfang build against a
 # frozen BASE build using fast-chess. Stage 3 keep/revert gate: one change per
 # test, trust the LLR, not the diff.
 #
@@ -29,9 +29,9 @@
 #   -fastchess <path> override fast-chess binary                  [PATH, then tools/]
 #
 # Examples:
-#   tools/sprt.sh -new build/stockwolf -base tools/stockwolf-base          # STC gate
+#   tools/sprt.sh -new build/grimfang -base tools/grimfang-base          # STC gate
 #   tools/sprt.sh -new NEW -base BASE -tc 40+0.4 -elo1 8                    # LTC confirm
-#   tools/sprt.sh -new tools/stockwolf-base -base tools/stockwolf-base      # self-match
+#   tools/sprt.sh -new tools/grimfang-base -base tools/grimfang-base      # self-match
 # -----------------------------------------------------------------------------
 set -euo pipefail
 

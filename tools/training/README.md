@@ -1,10 +1,10 @@
-# StockWolf NNUE Training (bullet)
+# Grimfang NNUE Training (bullet)
 
 First net: **768 -> 512 x2 -> 1**, SCReLU, perspective, no buckets.
 
 ## Prerequisites
 
-1. **bullet** cloned as sibling: `C:\Users\shywolf91\Dev\StockWolf\bullet` (pin: `cebc78a` at setup time)
+1. **bullet** cloned as sibling: `C:\Users\shywolf91\Dev\Grimfang\bullet` (pin: `cebc78a` at setup time)
 2. **Converted data**: `tools/data/train.bulletdata` (324,170,158 ChessBoard records, 32 bytes each)
 3. **CUDA Toolkit** on Windows:
    - `winget install Nvidia.CUDA` (13.3 as of setup)
@@ -27,7 +27,7 @@ First net: **768 -> 512 x2 -> 1**, SCReLU, perspective, no buckets.
 ./tools/training/run_full.ps1   # prints exact command
 ```
 
-## Training spec (stockwolf_net001.rs)
+## Training spec (grimfang_net001.rs)
 
 | Parameter | Value |
 |-----------|-------|
@@ -42,13 +42,13 @@ First net: **768 -> 512 x2 -> 1**, SCReLU, perspective, no buckets.
 
 ## Output format
 
-Checkpoints under `bullet/checkpoints/stockwolf-net-001-<N>/`:
+Checkpoints under `bullet/checkpoints/grimfang-net-001-<N>/`:
 
 - `quantised.bin` — **use this in the engine** (i16, column-major, padded to 64-byte multiple)
 - `raw.bin` — f32 weights (resume/debug)
 - `optimiser_state/` — AdamW state
 
-Quantised layout for HIDDEN=512 (from `stockwolf_net001.rs`):
+Quantised layout for HIDDEN=512 (from `grimfang_net001.rs`):
 
 ```
 feature_weights: [Accumulator; 768]   // each Accumulator = align(64) [i16; 512], QA

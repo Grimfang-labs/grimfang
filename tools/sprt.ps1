@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Run an engine-vs-engine SPRT of a NEW StockWolf build against a frozen BASE
+    Run an engine-vs-engine SPRT of a NEW Grimfang build against a frozen BASE
     build using fast-chess. This is the Stage 3 keep/revert gate: one change per
     test, trust the LLR, not the diff.
 
@@ -17,7 +17,7 @@
 
 .PARAMETER Base
     Path to the BASE engine executable (the frozen baseline, e.g.
-    stockwolf-base.exe). Every SPRT compares NEW against this.
+    grimfang-base.exe). Every SPRT compares NEW against this.
 
 .PARAMETER Tc
     Time control "moveSeconds+incrementSeconds". Default STC: 8+0.08.
@@ -63,15 +63,15 @@
 
 .EXAMPLE
     # STC gate of a feature branch build vs the frozen baseline
-    ./tools/sprt.ps1 -New build/Release/stockwolf.exe -Base tools/stockwolf-base.exe
+    ./tools/sprt.ps1 -New build/Release/grimfang.exe -Base tools/grimfang-base.exe
 
 .EXAMPLE
     # LTC confirmation for a depth-scaling feature
-    ./tools/sprt.ps1 -New NEW.exe -Base tools/stockwolf-base.exe -Tc 40+0.4 -Elo1 8
+    ./tools/sprt.ps1 -New NEW.exe -Base tools/grimfang-base.exe -Tc 40+0.4 -Elo1 8
 
 .EXAMPLE
     # Harness self-match validation (must reject [0,5], Elo ~ 0)
-    ./tools/sprt.ps1 -New tools/stockwolf-base.exe -Base tools/stockwolf-base.exe
+    ./tools/sprt.ps1 -New tools/grimfang-base.exe -Base tools/grimfang-base.exe
 #>
 [CmdletBinding()]
 param(

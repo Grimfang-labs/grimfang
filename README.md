@@ -1,21 +1,30 @@
-# StockWolf
+# Grimfang
 
-A UCI chess engine written in C++20.
+A UCI chess engine written in C++20. Formerly **StockWolf**.
 
 Bitboard move generation, alpha-beta search with a transposition table,
-principal variation search, killer/history move ordering, and a tapered
-material + piece-square-table evaluation.
+principal variation search, killer/history move ordering, and a perspective
+NNUE evaluation.
+
+## Playing strength
+
+| Release | Notes |
+|---------|--------|
+| **Sköll** | NNUE-launch milestone (bench `210851`) |
+
+Codename history lives here (and in git tags such as `v1.0-skoll`); the engine
+binary and UCI `id name` stay **Grimfang** across milestones.
 
 ## Build
 
 ```powershell
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
-# engine:  build/Release/stockwolf.exe
+# engine:  build/Release/grimfang.exe
 # tests:   ctest --test-dir build -C Release
 ```
 
-`stockwolf bench` prints the deterministic search signature (node count).
+`grimfang bench` prints the deterministic search signature (node count).
 
 ## Testing / SPRT harness
 

@@ -23,7 +23,7 @@
     change bench).
 
 .EXAMPLE
-    ./tools/bench_check.ps1 -Exe build/Release/stockwolf.exe
+    ./tools/bench_check.ps1 -Exe build/Release/grimfang.exe
 
 .EXAMPLE
     # Assert a refactor kept the Stage 2 baseline signature unchanged.

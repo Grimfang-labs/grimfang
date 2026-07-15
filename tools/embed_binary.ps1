@@ -22,7 +22,7 @@ try {
     $writer.WriteLine()
     $writer.WriteLine('namespace embedded_net {')
     $writer.WriteLine()
-    $writer.WriteLine('alignas(64) extern const unsigned char g_stockwolf_net_001[] = {')
+    $writer.WriteLine('alignas(64) extern const unsigned char g_grimfang_net_001[] = {')
 
     for ($i = 0; $i -lt $bytes.Length; $i++) {
         if (($i % 12) -eq 0) {
@@ -42,7 +42,7 @@ try {
 
     $writer.WriteLine('};')
     $writer.WriteLine()
-    $writer.WriteLine('extern const std::size_t g_stockwolf_net_001_size = sizeof(g_stockwolf_net_001);')
+    $writer.WriteLine('extern const std::size_t g_grimfang_net_001_size = sizeof(g_grimfang_net_001);')
     $writer.WriteLine()
     $writer.WriteLine('} // namespace embedded_net')
 }

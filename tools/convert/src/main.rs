@@ -8,7 +8,7 @@ use convert::{collect_input_shards, convert_shards, ConvertStats, PROGRESS_INTER
 #[derive(Parser, Debug)]
 #[command(
     name = "convert",
-    about = "Convert StockWolf datagen shards to bullet ChessBoard training data"
+    about = "Convert Grimfang datagen shards to bullet ChessBoard training data"
 )]
 struct Args {
     /// Input directory containing shard_*.bin files, or a single shard file.

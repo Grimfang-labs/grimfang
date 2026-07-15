@@ -17,15 +17,15 @@
 #include "position.hpp"
 
 static_assert(std::endian::native == std::endian::little,
-              "StockWolf NNUE loader assumes little-endian host layout");
+              "Grimfang NNUE loader assumes little-endian host layout");
 static_assert(offsetof(nnue::Network, feature_weights) == 0);
 static_assert(offsetof(nnue::Network, feature_bias) == 786432);
 static_assert(offsetof(nnue::Network, output_weights) == 787456);
 static_assert(offsetof(nnue::Network, output_bias) == 789504);
 
 namespace embedded_net {
-extern const unsigned char g_stockwolf_net_001[];
-extern const std::size_t   g_stockwolf_net_001_size;
+extern const unsigned char g_grimfang_net_001[];
+extern const std::size_t   g_grimfang_net_001_size;
 } // namespace embedded_net
 
 namespace {
@@ -45,9 +45,9 @@ int feature_index(Color perspective, Piece piece, Square sq) {
 
 const nnue::Network& network() {
     static const nnue::Network* net = []() -> const nnue::Network* {
-        if (embedded_net::g_stockwolf_net_001_size != nnue::kEmbeddedNetworkBytes)
+        if (embedded_net::g_grimfang_net_001_size != nnue::kEmbeddedNetworkBytes)
             fail_network_load("embedded size mismatch");
-        const auto* bytes = embedded_net::g_stockwolf_net_001;
+        const auto* bytes = embedded_net::g_grimfang_net_001;
         if ((reinterpret_cast<std::uintptr_t>(bytes) % alignof(nnue::Network)) != 0)
             fail_network_load("embedded bytes are not 64-byte aligned");
         const auto* loaded = reinterpret_cast<const nnue::Network*>(bytes);
@@ -150,9 +150,9 @@ void apply_delta_impl(nnue::AccumulatorPair& acc, const nnue::FeatureDelta& delt
     }
 }
 
-// STOCKWOLF_SCALAR_NNUE forces the scalar path even on an AVX2 build, so the
+// GRIMFANG_SCALAR_NNUE forces the scalar path even on an AVX2 build, so the
 // vectorized inference can be benchmarked head-to-head against the reference.
-#if defined(__AVX2__) && !defined(STOCKWOLF_SCALAR_NNUE)
+#if defined(__AVX2__) && !defined(GRIMFANG_SCALAR_NNUE)
 constexpr bool kUseSimd = true;
 #else
 constexpr bool kUseSimd = false;
@@ -260,7 +260,7 @@ Value nnue::evaluate_scalar(const Position& pos) {
 }
 
 Value nnue::evaluate(const Position& pos) {
-#if defined(__AVX2__) && !defined(STOCKWOLF_SCALAR_NNUE)
+#if defined(__AVX2__) && !defined(GRIMFANG_SCALAR_NNUE)
     const auto& net = network();
     const auto& acc = pos.nnue_accumulators();
     const Color stm = pos.side_to_move();

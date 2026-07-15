@@ -1,14 +1,14 @@
-//! StockWolf net 001 — first perspective NNUE value net.
+//! Grimfang net 001 — first perspective NNUE value net.
 //!
 //! Architecture: (768 -> 512)x2 -> 1, SCReLU, no buckets.
 //! Adapted from bullet `examples/simple.rs` (commit cebc78a).
 //!
 //! Environment overrides (optional):
-//!   STOCKWOLF_DATA       path to shuffled ChessBoard data file
-//!   STOCKWOLF_OUTPUT_DIR checkpoint directory (default: checkpoints)
-//!   STOCKWOLF_END_SB      last superbatch (default: 35; use 1 for smoke)
-//!   STOCKWOLF_THREADS      loader threads (default: 4)
-//!   STOCKWOLF_BATCH_QUEUE  batch queue size (default: 64)
+//!   GRIMFANG_DATA       path to shuffled ChessBoard data file
+//!   GRIMFANG_OUTPUT_DIR checkpoint directory (default: checkpoints)
+//!   GRIMFANG_END_SB      last superbatch (default: 35; use 1 for smoke)
+//!   GRIMFANG_THREADS      loader threads (default: 4)
+//!   GRIMFANG_BATCH_QUEUE  batch queue size (default: 64)
 
 use bullet_lib::{
     game::inputs::Chess768,
@@ -44,13 +44,13 @@ fn env_string(key: &str, default: &str) -> String {
 
 fn main() {
     let data_path = env_string(
-        "STOCKWOLF_DATA",
-        "../stockwolf/tools/data/train_shuffled.bulletdata",
+        "GRIMFANG_DATA",
+        "../grimfang/tools/data/train_shuffled.bulletdata",
     );
-    let output_dir = env_string("STOCKWOLF_OUTPUT_DIR", "checkpoints");
-    let end_superbatch = env_usize("STOCKWOLF_END_SB", DEFAULT_SUPERBATCHES);
-    let threads = env_usize("STOCKWOLF_THREADS", 4);
-    let batch_queue = env_usize("STOCKWOLF_BATCH_QUEUE", 64);
+    let output_dir = env_string("GRIMFANG_OUTPUT_DIR", "checkpoints");
+    let end_superbatch = env_usize("GRIMFANG_END_SB", DEFAULT_SUPERBATCHES);
+    let threads = env_usize("GRIMFANG_THREADS", 4);
+    let batch_queue = env_usize("GRIMFANG_BATCH_QUEUE", 64);
 
     let mut trainer = ValueTrainerBuilder::default()
         .dual_perspective()
@@ -74,7 +74,7 @@ fn main() {
         });
 
     let schedule = TrainingSchedule {
-        net_id: "stockwolf-net-001".to_string(),
+        net_id: "grimfang-net-001".to_string(),
         eval_scale: SCALE as f32,
         steps: TrainingSteps {
             batch_size: BATCH_SIZE,
@@ -98,7 +98,7 @@ fn main() {
         batch_queue_size: batch_queue,
     };
 
-    println!("StockWolf net 001 training");
+    println!("Grimfang net 001 training");
     println!("  data: {data_path}");
     println!("  output: {output_dir}");
     println!("  superbatches: 1..={end_superbatch}");

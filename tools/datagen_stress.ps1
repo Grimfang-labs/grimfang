@@ -9,7 +9,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $Exe         = 'build/Release/stockwolf.exe',
+    [string] $Exe         = 'build/Release/grimfang.exe',
     [int]    $Parallelism = 8,
     [int]    $Runs        = 5,
     [uint64] $Nodes       = 500,

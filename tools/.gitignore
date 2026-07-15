@@ -1,5 +1,5 @@
 # Downloaded / built artifacts that live in tools/ but must not be committed.
-# (*.exe is already ignored repo-wide, covering fastchess.exe and stockwolf-base.exe.)
+# (*.exe is already ignored repo-wide, covering fastchess.exe and grimfang-base.exe.)
 
 # fast-chess binary (download manually)
 /fastchess

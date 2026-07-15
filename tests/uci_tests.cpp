@@ -12,13 +12,13 @@
 // ===========================================================================
 // uci_tests.cpp - Stage 2 sub-step 4 gate.
 //
-// Drives the real engine binary (STOCKWOLF_ENGINE) by piping a scripted command
+// Drives the real engine binary (GRIMFANG_ENGINE) by piping a scripted command
 // sequence to its stdin and inspecting stdout: handshake, position/go, time
 // bounds, and asynchronous stop.
 // ===========================================================================
 
-#ifndef STOCKWOLF_ENGINE
-#error "STOCKWOLF_ENGINE path must be defined by the build"
+#ifndef GRIMFANG_ENGINE
+#error "GRIMFANG_ENGINE path must be defined by the build"
 #endif
 
 namespace {
@@ -40,7 +40,7 @@ std::string run_engine(const std::string& input) {
 
     // Wrap the whole command in an extra pair of quotes so cmd.exe keeps the
     // quoted paths intact even when they contain spaces.
-    const std::string inner = "\"" + std::string(STOCKWOLF_ENGINE) + "\" < \""
+    const std::string inner = "\"" + std::string(GRIMFANG_ENGINE) + "\" < \""
                             + inPath.string() + "\" > \"" + outPath.string() + "\"";
     const std::string full  = "\"" + inner + "\"";
     std::system(full.c_str());
@@ -80,7 +80,7 @@ int count_occurrences(const std::string& s, const std::string& sub) {
 
 TEST_CASE("uci: handshake", "[uci]") {
     const std::string out = run_engine("uci\nquit\n");
-    REQUIRE(contains(out, "id name StockWolf"));
+    REQUIRE(contains(out, "id name Grimfang"));
     REQUIRE(contains(out, "id author"));
     REQUIRE(contains(out, "uciok"));
 }
