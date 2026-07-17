@@ -27,16 +27,16 @@ struct CoreInit {
 const CoreInit g_coreInit;
 
 const std::array<std::pair<const char*, Value>, 10> kVerifierCases {{
-    { "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 179 },
-    { "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", -4 },
-    { "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", 61 },
-    { "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 70 },
-    { "8/8/8/4k3/8/3K4/4P3/8 b - - 0 1", -140 },
-    { "rnbqkbnr/pp1ppppp/8/2pP4/8/8/PPP1PPPP/RNBQKBNR w KQkq c6 0 3", 115 },
-    { "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", 87 },
-    { "4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1", 832 },
-    { "4k3/8/8/8/8/8/4Q3/4K3 b - - 0 1", -683 },
-    { "4k3/1P6/8/8/8/8/8/4K3 w - - 0 1", 1312 },
+    { "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 213 },
+    { "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", -77 },
+    { "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", 13 },
+    { "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 60 },
+    { "8/8/8/4k3/8/3K4/4P3/8 b - - 0 1", -263 },
+    { "rnbqkbnr/pp1ppppp/8/2pP4/8/8/PPP1PPPP/RNBQKBNR w KQkq c6 0 3", 188 },
+    { "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", 599 },
+    { "4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1", 721 },
+    { "4k3/8/8/8/8/8/4Q3/4K3 b - - 0 1", -829 },
+    { "4k3/1P6/8/8/8/8/8/4K3 w - - 0 1", 1414 },
 }};
 
 // Assert the SIMD eval/refresh are bit-identical to the scalar reference for a

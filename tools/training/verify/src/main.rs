@@ -136,7 +136,7 @@ fn main() {
     assert_eq!(align_of::<Accumulator>(), 64);
     assert_eq!(size_of::<Network>(), NETWORK_BYTES);
 
-    let bytes = fs::read("../grimfang-net-001.bin").expect("read ../grimfang-net-001.bin");
+    let bytes = fs::read("../grimfang-net-002.bin").expect("read ../grimfang-net-002.bin");
     assert_eq!(bytes.len(), NETWORK_BYTES, "net byte size mismatch");
 
     let mut network = Box::<MaybeUninit<Network>>::new(MaybeUninit::uninit());
