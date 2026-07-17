@@ -118,12 +118,18 @@ public:
                 break;
 
             // Aspiration: from depth 4 onward, search a narrow window around the
-            // previous iteration's score. Fail-high / fail-low widen and re-search
-            // the same depth. Depths < 4 and near-mate prev scores keep the full
-            // window. Widening is monotonic and capped at ±VALUE_INFINITE.
+            // previous iteration's score. Fail-high / fail-low widen (~1.5x from
+            // the fail-soft score) and re-search the same depth. Depths < 4 and
+            // near-mate prev scores keep the full window. Widening is monotonic
+            // and capped at ±VALUE_INFINITE.
+            //
+            // Initial δ=120 (not classic 20): against this NNUE, shallow ID scores
+            // routinely swing outside ±20, and gradual widening from 20 thrashed
+            // (bench +20% nodes). δ=120 still tightens vs ±INF and drops nodes
+            // at bench depths 6/8/10 vs the full-window baseline.
             Value alpha = -VALUE_INFINITE;
             Value beta  = VALUE_INFINITE;
-            Value delta = 100;
+            Value delta = 120;
             if (limits.aspiration
                 && depth >= 4
                 && havePrev
@@ -140,13 +146,11 @@ public:
                     break;
 
                 if (score <= alpha) {
-                    // Fail low: widen down around the fail-soft score. Stay
-                    // silent — do not print as exact.
+                    // Fail low: widen down around the returned score. Stay silent.
                     alpha = std::max<Value>(score - delta, -VALUE_INFINITE);
                     delta += delta / 2;
                 } else if (score >= beta) {
-                    // Fail high: widen up around the fail-soft score. Stay
-                    // silent — do not print as exact.
+                    // Fail high: widen up around the returned score. Stay silent.
                     beta  = std::min<Value>(score + delta, VALUE_INFINITE);
                     delta += delta / 2;
                 } else {
