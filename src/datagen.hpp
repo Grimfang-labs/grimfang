@@ -50,6 +50,7 @@ struct DatagenOptions {
     int           randomPlies  = 8;
     int           resignScore  = 1500;
     int           resignPlies  = 4;
+    int           progress     = 0;   // every N completed games; 0 = off
 };
 
 // Encode/decode helpers (testable without running a full game).

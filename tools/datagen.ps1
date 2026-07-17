@@ -29,6 +29,9 @@
 .PARAMETER RandomPlies
     Random opening plies (default 8).
 
+.PARAMETER Progress
+    Print a progress line every N completed games per shard (default 1000; 0 = off).
+
 .EXAMPLE
     ./tools/datagen.ps1 -Exe build/Release/grimfang.exe -Games 1000
 #>
@@ -42,7 +45,8 @@ param(
     [uint64] $Nodes         = 5000,
     [int]    $RandomPlies   = 8,
     [int]    $ResignScore   = 1500,
-    [int]    $ResignPlies   = 4
+    [int]    $ResignPlies   = 4,
+    [int]    $Progress      = 1000
 )
 
 $ErrorActionPreference = 'Stop'
@@ -86,7 +90,8 @@ for ($i = 0; $i -lt $Parallelism; $i++) {
         '--nodes', "$Nodes",
         '--random-plies', "$RandomPlies",
         '--resign-score', "$ResignScore",
-        '--resign-plies', "$ResignPlies"
+        '--resign-plies', "$ResignPlies",
+        '--progress', "$Progress"
     )
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()

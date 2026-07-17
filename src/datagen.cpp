@@ -171,17 +171,20 @@ struct BufferedPosition {
     DatagenRecord rec;
 };
 
-void flush_game(std::vector<BufferedPosition>& buffer, DatagenOutcome outcome,
-                std::FILE* out) {
+std::size_t flush_game(std::vector<BufferedPosition>& buffer, DatagenOutcome outcome,
+                       std::FILE* out) {
+    const std::size_t n = buffer.size();
     for (auto& bp : buffer) {
         apply_result(bp.rec, static_cast<Color>(bp.rec.stm), outcome);
         std::fwrite(&bp.rec, sizeof(DatagenRecord), 1, out);
     }
     buffer.clear();
+    return n;
 }
 
 bool play_one_game(Position& pos, Rng64& rng, const DatagenOptions& opts,
-                   std::vector<BufferedPosition>& buffer, std::FILE* out) {
+                   std::vector<BufferedPosition>& buffer, std::FILE* out,
+                   std::uint64_t& positions) {
     pos = Position::startpos();
     buffer.clear();
 
@@ -193,7 +196,7 @@ bool play_one_game(Position& pos, Rng64& rng, const DatagenOptions& opts,
     for (;;) {
         const TerminalKind terminal = terminal_state(pos);
         if (terminal != TerminalKind::None) {
-            flush_game(buffer, outcome_from_terminal(terminal), out);
+            positions += flush_game(buffer, outcome_from_terminal(terminal), out);
             return true;
         }
 
@@ -215,7 +218,9 @@ bool play_one_game(Position& pos, Rng64& rng, const DatagenOptions& opts,
         if (score >= opts.resignScore || score <= -opts.resignScore) {
             ++resignRun;
             if (resignRun >= opts.resignPlies) {
-                flush_game(buffer, outcome_from_resign(pos.side_to_move(), score), out);
+                positions += flush_game(buffer,
+                                        outcome_from_resign(pos.side_to_move(), score),
+                                        out);
                 return true;
             }
         } else {
@@ -338,6 +343,7 @@ DatagenOptions parse_datagen_args(int argc, char** argv) {
         else if (arg == "--random-plies")  opts.randomPlies = std::stoi(needValue("--random-plies"));
         else if (arg == "--resign-score")  opts.resignScore = std::stoi(needValue("--resign-score"));
         else if (arg == "--resign-plies")  opts.resignPlies = std::stoi(needValue("--resign-plies"));
+        else if (arg == "--progress")      opts.progress    = std::stoi(needValue("--progress"));
         else
             throw std::runtime_error("unknown datagen flag: " + arg);
     }
@@ -352,6 +358,8 @@ DatagenOptions parse_datagen_args(int argc, char** argv) {
         throw std::runtime_error("--resign-score must be positive");
     if (opts.resignPlies <= 0)
         throw std::runtime_error("--resign-plies must be positive");
+    if (opts.progress < 0)
+        throw std::runtime_error("--progress must be >= 0");
     return opts;
 }
 
@@ -368,10 +376,17 @@ std::uint64_t run_datagen(const DatagenOptions& opts) {
     std::vector<BufferedPosition> buffer;
     buffer.reserve(256);
 
-    int completed = 0;
+    int           completed = 0;
+    std::uint64_t positions = 0;
     while (completed < opts.games) {
-        if (play_one_game(pos, rng, opts, buffer, out))
+        if (play_one_game(pos, rng, opts, buffer, out, positions)) {
             ++completed;
+            if (opts.progress > 0 && completed % opts.progress == 0) {
+                std::cout << "shard progress: " << completed << " games, "
+                          << positions << " positions\n";
+                std::cout.flush();
+            }
+        }
     }
 
     std::fclose(out);
@@ -381,8 +396,7 @@ std::uint64_t run_datagen(const DatagenOptions& opts) {
     if (bytes < 0 || bytes % static_cast<std::streamoff>(sizeof(DatagenRecord)) != 0)
         throw std::runtime_error("output file size is not a multiple of record size");
 
-    const std::uint64_t positions =
-        static_cast<std::uint64_t>(bytes) / sizeof(DatagenRecord);
+    positions = static_cast<std::uint64_t>(bytes) / sizeof(DatagenRecord);
 
     std::cout << "datagen complete: " << completed << " games, "
               << positions << " positions -> " << opts.outPath << std::endl;
