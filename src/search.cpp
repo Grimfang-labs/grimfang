@@ -1,5 +1,6 @@
 #include "search.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
@@ -30,6 +31,10 @@
 // PV-node classification: a node is a PV node iff it is reached by always
 // following the first (best) move from the root. TT cutoffs are taken only at
 // non-PV, non-root nodes so the principal variation is searched in full.
+//
+// Aspiration windows (ID driver only): from depth 4, each iteration opens a
+// narrow window around the previous score and widens on fail-high / fail-low.
+// Near-mate previous scores keep the full window.
 // ===========================================================================
 
 namespace {
@@ -103,20 +108,57 @@ public:
         }
         result.bestMove = rootMoves.moves[0];   // legal fallback
 
+        Value prevScore = 0;
+        bool  havePrev  = false;
+
         for (int depth = 1; depth <= maxDepth; ++depth) {
             // Soft limit: don't start a new iteration if we are unlikely to
             // finish it within the budget.
             if (useTime_ && depth > 1 && elapsed_ms() >= softMs_)
                 break;
 
-            const Value score =
-                negamax(pos, depth, -VALUE_INFINITE, VALUE_INFINITE, 0,
-                        /*pvNode=*/true, /*prevWasNull=*/false);
+            // Aspiration: from depth 4 onward, search a narrow window around the
+            // previous iteration's score. Fail-high / fail-low widen and re-search
+            // the same depth. Depths < 4 and near-mate prev scores keep the full
+            // window. Widening is monotonic and capped at ±VALUE_INFINITE.
+            Value alpha = -VALUE_INFINITE;
+            Value beta  = VALUE_INFINITE;
+            Value delta = 100;
+            if (limits.aspiration
+                && depth >= 4
+                && havePrev
+                && std::abs(prevScore) < VALUE_MATE_IN_MAX_PLY) {
+                alpha = prevScore - delta;
+                beta  = prevScore + delta;
+            }
+
+            Value score = 0;
+            while (true) {
+                score = negamax(pos, depth, alpha, beta, 0,
+                                /*pvNode=*/true, /*prevWasNull=*/false);
+                if (aborted_)
+                    break;
+
+                if (score <= alpha) {
+                    // Fail low: widen down around the fail-soft score. Stay
+                    // silent — do not print as exact.
+                    alpha = std::max<Value>(score - delta, -VALUE_INFINITE);
+                    delta += delta / 2;
+                } else if (score >= beta) {
+                    // Fail high: widen up around the fail-soft score. Stay
+                    // silent — do not print as exact.
+                    beta  = std::min<Value>(score + delta, VALUE_INFINITE);
+                    delta += delta / 2;
+                } else {
+                    break;   // score inside window: exact for this depth
+                }
+            }
 
             const bool haveMove = pvLength_[0] > 0;
             if (aborted_) {
-                // Keep the result from the last fully completed iteration; the
-                // very first iteration still yields a usable move if it found one.
+                // Discard this depth (including any interrupted fail-high/low
+                // re-search). Keep the last fully completed iteration; depth 1
+                // may still yield a usable move if it found one before abort.
                 if (depth == 1 && haveMove) {
                     result.score    = score;
                     result.depth    = depth;
@@ -129,6 +171,8 @@ public:
             result.score    = score;
             result.depth    = depth;
             if (haveMove) result.bestMove = pvTable_[0][0];
+            prevScore = score;
+            havePrev  = true;
 
             if (printInfo) print_info(depth, score, pos);
 
@@ -513,6 +557,15 @@ Search::Result Search::search_fixed(Position& pos, int depth, std::atomic<bool>&
 Search::Result Search::search_fixed(Position& pos, int depth) {
     std::atomic<bool> never{ false };
     return search_fixed(pos, depth, never);
+}
+
+Search::Result Search::search_fixed(Position& pos, int depth, bool useAspiration) {
+    std::atomic<bool> never{ false };
+    Searcher s(never);
+    Search::Limits limits;
+    limits.depth      = depth;
+    limits.aspiration = useAspiration;
+    return s.iterate(pos, limits, /*printInfo=*/false);
 }
 
 Search::Result Search::search_nodes(Position& pos, std::uint64_t nodeLimit,
