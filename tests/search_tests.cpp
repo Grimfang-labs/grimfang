@@ -12,6 +12,7 @@
 #include "movegen.hpp"
 #include "position.hpp"
 #include "search.hpp"
+#include "tt.hpp"
 #include "zobrist.hpp"
 
 // ===========================================================================
@@ -123,6 +124,74 @@ TEST_CASE("search: mate in 3", "[search][mate]") {
 
     const Search::Result r = Search::search_fixed(pos, 7);
     REQUIRE(mate_in(r.score) == 3);
+}
+
+TEST_CASE("aspiration: terminates and matches full-window on mates; sharp FENs legal",
+          "[search][aspiration]") {
+    // Aspiration changes cost, not the mathematical answer — but TT entries
+    // written by a fail-high/low re-search can change move ordering on the
+    // final pass, so non-mate scores need not match bit-identically. Mate
+    // positions either skip aspiration (mate guard) or agree on mate distance.
+    const struct MateCase {
+        const char* fen;
+        int         depth;
+        int         mateMoves;
+    } mates[] = {
+        { "7k/Q7/6K1/8/8/8/8/8 w - - 0 1", 5, 1 },
+        { "7k/8/5K2/8/8/8/8/5R2 w - - 0 1", 6, 2 },
+    };
+
+    for (const auto& c : mates) {
+        Position posAsp;
+        posAsp.set_fen(c.fen);
+        TT.clear();
+        const Search::Result asp = Search::search_fixed(posAsp, c.depth, true);
+
+        Position posFull;
+        posFull.set_fen(c.fen);
+        TT.clear();
+        const Search::Result full = Search::search_fixed(posFull, c.depth, false);
+
+        REQUIRE(mate_in(asp.score) == c.mateMoves);
+        REQUIRE(asp.score == full.score);
+        REQUIRE(asp.bestMove == full.bestMove);
+    }
+
+    // Sharp tactical FENs: loop must terminate with a legal bestmove, and must
+    // not thrash (aspirated node count should not greatly exceed full-window).
+    const struct SharpCase {
+        const char* fen;
+        int         depth;
+    } sharp[] = {
+        { "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 6 },
+        { "r1bqk2r/ppp2ppp/2n2n2/2bpp3/4P3/2NP1N2/PPP2PPP/R1BQKB1R w KQkq - 0 5", 6 },
+        { "8/pp3p1k/2p2q1p/3r1P2/5R2/7P/P1P1QP2/7K b - - 2 30", 6 },
+    };
+
+    for (const auto& c : sharp) {
+        Position posAsp;
+        posAsp.set_fen(c.fen);
+        TT.clear();
+        const Search::Result asp = Search::search_fixed(posAsp, c.depth, true);
+
+        Position posFull;
+        posFull.set_fen(c.fen);
+        TT.clear();
+        const Search::Result full = Search::search_fixed(posFull, c.depth, false);
+
+        REQUIRE(asp.bestMove != MOVE_NONE);
+        REQUIRE(asp.depth == c.depth);
+
+        MoveList legal;
+        generate_legal(posAsp, legal);
+        bool legalChoice = false;
+        for (int i = 0; i < legal.count; ++i)
+            if (legal.moves[i] == asp.bestMove) { legalChoice = true; break; }
+        REQUIRE(legalChoice);
+
+        // Thrash guard: repeated fail-high/low would inflate nodes badly.
+        REQUIRE(asp.nodes <= full.nodes * 2 + 1000);
+    }
 }
 
 TEST_CASE("search: stalemate scores as a draw", "[search][draw]") {

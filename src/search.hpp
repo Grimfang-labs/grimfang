@@ -28,6 +28,8 @@ struct Limits {
     int           movetime       = 0;
     std::uint64_t nodes          = 0;
     bool          infinite       = false;
+    // When false, every ID depth uses a full (-INF,+INF) window (tests only).
+    bool          aspiration     = true;
 };
 
 struct Result {
@@ -49,6 +51,10 @@ Result search_fixed(Position& pos, int depth, std::atomic<bool>& stop);
 
 // Convenience overload for callers that never abort (tests).
 Result search_fixed(Position& pos, int depth);
+
+// Like search_fixed, but when useAspiration is false every depth uses a full
+// (-INF,+INF) window — for aspiration-vs-full-window equivalence tests.
+Result search_fixed(Position& pos, int depth, bool useAspiration);
 
 // Node-capped iterative deepening (no info output). Uses the existing
 // limits.nodes stop path; inert when nodeLimit == 0. Does not affect bench/UCI
