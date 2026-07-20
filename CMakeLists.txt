@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(grimfang LANGUAGES CXX)
 
-set(GRIMFANG_NET_BIN "${CMAKE_CURRENT_SOURCE_DIR}/tools/training/grimfang-net-002.bin")
+set(GRIMFANG_NET_BIN "${CMAKE_CURRENT_SOURCE_DIR}/tools/training/grimfang-net-003.bin")
 set(GRIMFANG_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(GRIMFANG_EMBEDDED_NET_CPP "${GRIMFANG_GENERATED_DIR}/grimfang_net_001.cpp")
 
