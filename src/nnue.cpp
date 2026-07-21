@@ -24,8 +24,8 @@ static_assert(offsetof(nnue::Network, output_weights) == 787456);
 static_assert(offsetof(nnue::Network, output_bias) == 789504);
 
 namespace embedded_net {
-extern const unsigned char g_grimfang_net_001[];
-extern const std::size_t   g_grimfang_net_001_size;
+extern const unsigned char g_grimfang_net[];
+extern const std::size_t   g_grimfang_net_size;
 } // namespace embedded_net
 
 namespace {
@@ -45,9 +45,9 @@ int feature_index(Color perspective, Piece piece, Square sq) {
 
 const nnue::Network& network() {
     static const nnue::Network* net = []() -> const nnue::Network* {
-        if (embedded_net::g_grimfang_net_001_size != nnue::kEmbeddedNetworkBytes)
+        if (embedded_net::g_grimfang_net_size != nnue::kEmbeddedNetworkBytes)
             fail_network_load("embedded size mismatch");
-        const auto* bytes = embedded_net::g_grimfang_net_001;
+        const auto* bytes = embedded_net::g_grimfang_net;
         if ((reinterpret_cast<std::uintptr_t>(bytes) % alignof(nnue::Network)) != 0)
             fail_network_load("embedded bytes are not 64-byte aligned");
         const auto* loaded = reinterpret_cast<const nnue::Network*>(bytes);

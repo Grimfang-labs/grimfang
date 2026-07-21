@@ -2,6 +2,9 @@
 
 First net: **768 -> 512 x2 -> 1**, SCReLU, perspective, no buckets.
 
+Superseded nets are archived outside the repo; regenerate them from the training
+configs and datasets if needed.
+
 ## Prerequisites
 
 1. **bullet** cloned as sibling: `C:\Users\shywolf91\Dev\Grimfang\bullet` (pin: `cebc78a` at setup time)

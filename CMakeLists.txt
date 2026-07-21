@@ -4,7 +4,33 @@ project(grimfang LANGUAGES CXX)
 
 set(GRIMFANG_NET_BIN "${CMAKE_CURRENT_SOURCE_DIR}/tools/training/grimfang-net-003.bin")
 set(GRIMFANG_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
-set(GRIMFANG_EMBEDDED_NET_CPP "${GRIMFANG_GENERATED_DIR}/grimfang_net_001.cpp")
+set(GRIMFANG_EMBEDDED_NET_CPP "${GRIMFANG_GENERATED_DIR}/grimfang_net_embedded.cpp")
+
+# Generate the embedded network with CMake itself so the build has no host-shell
+# dependency. Reconfigure automatically if the selected network changes.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GRIMFANG_NET_BIN}")
+file(READ "${GRIMFANG_NET_BIN}" GRIMFANG_NET_HEX HEX)
+string(TOUPPER "${GRIMFANG_NET_HEX}" GRIMFANG_NET_HEX)
+string(REGEX REPLACE
+  "([0-9A-F][0-9A-F])([0-9A-F][0-9A-F])([0-9A-F][0-9A-F])([0-9A-F][0-9A-F])([0-9A-F][0-9A-F])([0-9A-F][0-9A-F])([0-9A-F][0-9A-F])([0-9A-F][0-9A-F])"
+  "    0x\\1, 0x\\2, 0x\\3, 0x\\4, 0x\\5, 0x\\6, 0x\\7, 0x\\8,\n"
+  GRIMFANG_NET_INITIALIZER
+  "${GRIMFANG_NET_HEX}")
+file(MAKE_DIRECTORY "${GRIMFANG_GENERATED_DIR}")
+file(WRITE "${GRIMFANG_EMBEDDED_NET_CPP}"
+  "#include <cstddef>\n"
+  "\n"
+  "namespace embedded_net {\n"
+  "\n"
+  "alignas(64) extern const unsigned char g_grimfang_net[] = {\n"
+  "${GRIMFANG_NET_INITIALIZER}"
+  "};\n"
+  "\n"
+  "extern const std::size_t g_grimfang_net_size = sizeof(g_grimfang_net);\n"
+  "\n"
+  "} // namespace embedded_net\n")
+unset(GRIMFANG_NET_HEX)
+unset(GRIMFANG_NET_INITIALIZER)
 
 # ---------------------------------------------------------------------------
 # Global C++ settings
@@ -76,15 +102,6 @@ find_package(Threads REQUIRED)
 target_include_directories(grimfang_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(grimfang_core PUBLIC grimfang_flags Threads::Threads)
 target_compile_definitions(grimfang_core PRIVATE $<$<CONFIG:Debug>:NNUE_INCREMENTAL_CHECK=1>)
-
-add_custom_command(
-  OUTPUT ${GRIMFANG_EMBEDDED_NET_CPP}
-  COMMAND powershell -NoProfile -ExecutionPolicy Bypass
-    -File ${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_binary.ps1
-    -InputFile ${GRIMFANG_NET_BIN}
-    -OutputFile ${GRIMFANG_EMBEDDED_NET_CPP}
-  DEPENDS ${GRIMFANG_NET_BIN} ${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_binary.ps1
-  VERBATIM)
 
 # ---------------------------------------------------------------------------
 # Engine executable

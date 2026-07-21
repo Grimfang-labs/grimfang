@@ -4,6 +4,10 @@
 /cmake-build-*/
 /_deps/
 
+# Superseded NNUE network artifacts
+/tools/training/grimfang-net-001.bin
+/tools/training/grimfang-net-002.bin
+
 # CMake artifacts
 CMakeCache.txt
 CMakeFiles/
