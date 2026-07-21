@@ -38,11 +38,18 @@ std::string run_engine(const std::string& input) {
         in << input;
     }
 
-    // Wrap the whole command in an extra pair of quotes so cmd.exe keeps the
-    // quoted paths intact even when they contain spaces.
-    const std::string inner = "\"" + std::string(GRIMFANG_ENGINE) + "\" < \""
-                            + inPath.string() + "\" > \"" + outPath.string() + "\"";
-    const std::string full  = "\"" + inner + "\"";
+    // Engine path and redirect targets are individually quoted so spaces in
+    // paths are safe on both platforms. On Windows, cmd.exe (via std::system)
+    // also needs an outer quote wrapper around the whole command; on POSIX,
+    // /bin/sh -c must NOT see that wrapper or it treats the string as one
+    // program name and fails with "not found".
+    const std::string cmd = "\"" + std::string(GRIMFANG_ENGINE) + "\" < \""
+                          + inPath.string() + "\" > \"" + outPath.string() + "\"";
+#ifdef _WIN32
+    const std::string full = "\"" + cmd + "\"";
+#else
+    const std::string& full = cmd;
+#endif
     std::system(full.c_str());
 
     std::ifstream out(outPath, std::ios::binary);
