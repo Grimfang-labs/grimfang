@@ -129,8 +129,8 @@ Bitboard rook_attacks_slow(Square s, Bitboard occ)   { return slow_slider(s, Roo
 // tables are verified against the slow reference for every blocker subset.
 // ===========================================================================
 
-// TEMP DIAGNOSTIC: external linkage so tests/perft_tests.cpp can dump the first
-// magic/slow mismatch. Revert with the perft_tests.cpp diagnostic.
+namespace {
+
 struct Magic {
     Bitboard  mask;
     Bitboard  magic;
@@ -144,8 +144,6 @@ Magic BishopMagics[SQ_NB];
 // Standard fancy-magic backing-array sizes (sum of 1 << relevant_bits).
 Bitboard RookTable[102400];
 Bitboard BishopTable[5248];
-
-namespace {
 
 // Relevant occupancy mask: slider rays excluding the board-edge squares (a
 // blocker on the far edge never changes which squares are attacked).
