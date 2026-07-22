@@ -1,5 +1,8 @@
 #include "bitboard.hpp"
 
+#include <cassert>
+#include <cstdlib>
+
 // ===========================================================================
 // bitboard.cpp - geometry tables and pretty printer.
 //
@@ -22,21 +25,22 @@ constexpr Direction BishopDirs[4] = { NORTH_EAST, SOUTH_EAST, SOUTH_WEST, NORTH_
 
 // Walk a single ray from `from` in step direction `d`, stopping at the board
 // edge. `occ` blockers are inclusive (the blocker square is added then we stop).
+// Destination is validated before any square_bb shift (same GCC 13 -O3 hazard
+// as attacks.cpp::ray_attacks: direction-group edge checks can be dropped).
 Bitboard ray_attacks(Square from, Direction d, Bitboard occ) {
     Bitboard attacks = 0;
     Square   s       = from;
 
     while (true) {
-        const File f = file_of(s);
-        const Rank r = rank_of(s);
+        assert(is_ok(s));
+        const int to = static_cast<int>(s) + static_cast<int>(d);
+        if (to < 0 || to > 63) break;
+        if (std::abs(static_cast<int>(file_of(static_cast<Square>(to))) -
+                     static_cast<int>(file_of(s))) > 1)
+            break;
 
-        // Reject steps that would wrap around a board edge.
-        if ((d == EAST || d == NORTH_EAST || d == SOUTH_EAST) && f == FILE_H) break;
-        if ((d == WEST || d == NORTH_WEST || d == SOUTH_WEST) && f == FILE_A) break;
-        if ((d == NORTH || d == NORTH_EAST || d == NORTH_WEST) && r == RANK_8) break;
-        if ((d == SOUTH || d == SOUTH_EAST || d == SOUTH_WEST) && r == RANK_1) break;
-
-        s += d;
+        s = static_cast<Square>(to);
+        assert(is_ok(s));
         attacks |= square_bb(s);
         if (occ & square_bb(s)) break;   // hit a blocker (inclusive)
     }
@@ -79,14 +83,15 @@ void init() {
                 Square   s       = sa;
 
                 while (true) {
-                    const File f = file_of(s);
-                    const Rank r = rank_of(s);
-                    if ((d == EAST || d == NORTH_EAST || d == SOUTH_EAST) && f == FILE_H) break;
-                    if ((d == WEST || d == NORTH_WEST || d == SOUTH_WEST) && f == FILE_A) break;
-                    if ((d == NORTH || d == NORTH_EAST || d == NORTH_WEST) && r == RANK_8) break;
-                    if ((d == SOUTH || d == SOUTH_EAST || d == SOUTH_WEST) && r == RANK_1) break;
+                    assert(is_ok(s));
+                    const int to = static_cast<int>(s) + static_cast<int>(d);
+                    if (to < 0 || to > 63) break;
+                    if (std::abs(static_cast<int>(file_of(static_cast<Square>(to))) -
+                                 static_cast<int>(file_of(s))) > 1)
+                        break;
 
-                    s += d;
+                    s = static_cast<Square>(to);
+                    assert(is_ok(s));
                     BetweenBB[a][s] = between;     // squares strictly between
                     between |= square_bb(s);       // include s for the next hop
                 }
