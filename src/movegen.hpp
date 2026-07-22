@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cassert>
+
 #include "move.hpp"
 #include "types.hpp"
 
@@ -16,7 +18,11 @@ struct MoveList {
     Move moves[CAPACITY];
     int  count = 0;
 
-    void add(Move m) { moves[count++] = m; }
+    void add(Move m) {
+        assert(count < CAPACITY);
+        if (count >= CAPACITY) return;
+        moves[count++] = m;
+    }
 
     Move*       begin()       { return moves; }
     Move*       end()         { return moves + count; }
