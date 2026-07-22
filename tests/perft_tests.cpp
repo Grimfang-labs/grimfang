@@ -1,3 +1,5 @@
+#include <cstddef>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -9,6 +11,18 @@
 #include "perft.hpp"
 #include "position.hpp"
 #include "zobrist.hpp"
+
+// TEMP DIAGNOSTIC: matching layout / linkage for Magic dump (revert with this).
+struct Magic {
+    Bitboard  mask;
+    Bitboard  magic;
+    Bitboard* attacks;
+    unsigned  shift;
+};
+extern Magic    BishopMagics[];
+extern Magic    RookMagics[];
+extern Bitboard BishopTable[];
+extern Bitboard RookTable[];
 
 // ===========================================================================
 // perft_tests.cpp - Stage 1 test gate.
@@ -81,9 +95,72 @@ TEST_CASE("magic sliders equal the slow reference", "[attacks][magic]") {
         const Square s = static_cast<Square>(sq);
         for (int t = 0; t < 64; ++t) {
             const Bitboard occ = rng() & rng();   // sparse-ish occupancy
-            REQUIRE(bishop_attacks(s, occ) == bishop_attacks_slow(s, occ));
-            REQUIRE(rook_attacks(s, occ)   == rook_attacks_slow(s, occ));
-            REQUIRE(queen_attacks(s, occ)  ==
+
+            // TEMP DIAGNOSTIC: first bishop mismatch only — print then fail.
+            {
+                const Bitboard magic_bb = bishop_attacks(s, occ);
+                const Bitboard slow_bb  = bishop_attacks_slow(s, occ);
+                if (magic_bb != slow_bb) {
+                    const Magic& m = BishopMagics[s];
+                    const unsigned idx =
+                        static_cast<unsigned>(((occ & m.mask) * m.magic) >> m.shift);
+                    const Bitboard slow_bb2 = bishop_attacks_slow(s, occ);
+                    std::fprintf(stderr,
+                        "BISHOP MISMATCH\n"
+                        "  sq=%d s=%d\n"
+                        "  occ=%016llx\n"
+                        "  magic=%016llx slow=%016llx\n"
+                        "  idx=%u mask=%016llx magic_mul=%016llx shift=%u\n"
+                        "  slice_base=%td slice_size=%u\n"
+                        "  slow2=%016llx\n",
+                        sq, static_cast<int>(s),
+                        static_cast<unsigned long long>(occ),
+                        static_cast<unsigned long long>(magic_bb),
+                        static_cast<unsigned long long>(slow_bb),
+                        idx,
+                        static_cast<unsigned long long>(m.mask),
+                        static_cast<unsigned long long>(m.magic),
+                        m.shift,
+                        static_cast<std::ptrdiff_t>(m.attacks - BishopTable),
+                        1u << (64 - m.shift),
+                        static_cast<unsigned long long>(slow_bb2));
+                    FAIL("bishop magic mismatch (see stderr)");
+                }
+            }
+
+            // TEMP DIAGNOSTIC: first rook mismatch only (if bishop passed).
+            {
+                const Bitboard magic_bb = rook_attacks(s, occ);
+                const Bitboard slow_bb  = rook_attacks_slow(s, occ);
+                if (magic_bb != slow_bb) {
+                    const Magic& m = RookMagics[s];
+                    const unsigned idx =
+                        static_cast<unsigned>(((occ & m.mask) * m.magic) >> m.shift);
+                    const Bitboard slow_bb2 = rook_attacks_slow(s, occ);
+                    std::fprintf(stderr,
+                        "ROOK MISMATCH\n"
+                        "  sq=%d s=%d\n"
+                        "  occ=%016llx\n"
+                        "  magic=%016llx slow=%016llx\n"
+                        "  idx=%u mask=%016llx magic_mul=%016llx shift=%u\n"
+                        "  slice_base=%td slice_size=%u\n"
+                        "  slow2=%016llx\n",
+                        sq, static_cast<int>(s),
+                        static_cast<unsigned long long>(occ),
+                        static_cast<unsigned long long>(magic_bb),
+                        static_cast<unsigned long long>(slow_bb),
+                        idx,
+                        static_cast<unsigned long long>(m.mask),
+                        static_cast<unsigned long long>(m.magic),
+                        m.shift,
+                        static_cast<std::ptrdiff_t>(m.attacks - RookTable),
+                        1u << (64 - m.shift),
+                        static_cast<unsigned long long>(slow_bb2));
+                    FAIL("rook magic mismatch (see stderr)");
+                }
+            }
+
+            REQUIRE(queen_attacks(s, occ) ==
                     (bishop_attacks_slow(s, occ) | rook_attacks_slow(s, occ)));
         }
     }

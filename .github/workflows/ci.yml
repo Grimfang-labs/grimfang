@@ -25,3 +25,30 @@ jobs:
       - name: Test (fast)
         working-directory: build
         run: ctest --build-config Release --output-on-failure --label-exclude slow
+
+  # Linux-only sanitizer job: catches the memory corruption behind the Release
+  # test failures (ASan reports the exact out-of-bounds write, UBSan the exact
+  # undefined operation, with file:line stack traces in the log).
+  sanitize:
+    name: ubuntu-latest (asan+ubsan)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build-asan
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -g"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build-asan
+
+      - name: Test (fast, sanitized)
+        working-directory: build-asan
+        env:
+          ASAN_OPTIONS: abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: ctest --output-on-failure --label-exclude slow
