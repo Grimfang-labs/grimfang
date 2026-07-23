@@ -108,6 +108,22 @@ TEST_CASE("search: mate in 1", "[search][mate]") {
     REQUIRE(is_checkmate(pos.fen()));
 }
 
+TEST_CASE("qsearch: mate-in-1 at depth 1 (no stand-pat in check)",
+          "[search][qsearch][soundness]") {
+    // Depth 1 plays the mating move then enters qsearch with the side to move
+    // in check and zero legal evasions. Old qsearch stood pat on the static
+    // eval there and could miss mate-in-1 entirely; bestScore = -MATE + ply
+    // makes the checkmated child return a mate score.
+    Position pos;
+    pos.set_fen("7k/Q7/6K1/8/8/8/8/8 w - - 0 1");
+    TT.clear();
+    const Search::Result r = Search::search_fixed(pos, 1);
+    REQUIRE(mate_in(r.score) == 1);
+    REQUIRE(r.bestMove != MOVE_NONE);
+    pos.make_move(r.bestMove);
+    REQUIRE(is_checkmate(pos.fen()));
+}
+
 TEST_CASE("search: mate in 2", "[search][mate]") {
     // White: Kf6, Rf1. Black: Kh8. 1.Kg6! Kg8 2.Rf8#. No mate in 1 (Rf8+ Kh7).
     Position pos;

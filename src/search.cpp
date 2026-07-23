@@ -308,12 +308,40 @@ private:
     }
 
     // ---- Quiescence ----------------------------------------------------
+    // Stand-pat is illegal while in check: search every legal evasion instead.
+    // bestScore starts at -VALUE_MATE + ply so a checkmated node (zero evasions)
+    // returns a mate score. Non-check path below is unchanged (fail-hard,
+    // captures-only, no TT / delta pruning).
     Value quiescence(Position& pos, Value alpha, Value beta, int ply) {
         ++nodes_;
         if (ply > seldepth_) seldepth_ = ply;
         if (should_stop())   return alpha;
         if (ply >= MAX_PLY - 1)
             return Eval::evaluate(pos);
+
+        if (pos.checkers() != 0) {
+            Value bestScore = static_cast<Value>(-VALUE_MATE + ply);
+            MoveList evasions;
+            generate_legal(pos, evasions);
+            order_moves(pos, evasions, MOVE_NONE, MOVE_NONE, MOVE_NONE);
+
+            for (int i = 0; i < evasions.count; ++i) {
+                const Move m = evasions.moves[i];
+                pos.make_move(m);
+                const Value score = -quiescence(pos, -beta, -alpha, ply + 1);
+                pos.unmake_move(m);
+
+                if (aborted_)
+                    return alpha;
+                if (score > bestScore)
+                    bestScore = score;
+                if (score >= beta)
+                    return beta;
+                if (score > alpha)
+                    alpha = score;
+            }
+            return bestScore;
+        }
 
         const Value standPat = Eval::evaluate(pos);
         if (standPat >= beta)
