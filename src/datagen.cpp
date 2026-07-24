@@ -30,15 +30,26 @@ constexpr int SCORE_BLOWOUT_LIMIT = 3000;
 // a legal move) must not spin the completion loop forever.
 constexpr int MAX_CONSECUTIVE_FAILURES = 10000;
 
-// Simple 64-bit LCG for reproducible random opening moves.
+// xorshift64* PRNG for reproducible random opening moves — the same generator
+// used for Zobrist keys (zobrist.cpp) and the magic search (attacks.cpp).
+//
+// This replaces the previous 64-bit LCG. An LCG's low-order bits have short
+// periods (the lowest bit just alternates), and bounded() reduces with a
+// modulo that is dominated by those low bits — biasing which legal move is
+// picked for each random opening ply and shrinking opening diversity in the
+// generated training data. xorshift64*'s output is well-mixed across all bits,
+// so the modulo is far closer to uniform. The sequence is still fully
+// deterministic for a given seed, so runs remain reproducible.
 struct Rng64 {
     std::uint64_t state;
 
     explicit Rng64(std::uint64_t seed) : state(seed ? seed : 1) {}
 
     std::uint64_t next() {
-        state = state * 6364136223846793005ULL + 1442695040888963407ULL;
-        return state;
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        return state * 0x2545F4914F6CDD1DULL;
     }
 
     int bounded(int n) {
