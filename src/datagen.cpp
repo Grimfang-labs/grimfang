@@ -1,6 +1,7 @@
 #include "datagen.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -8,6 +9,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "bitboard.hpp"
@@ -172,11 +174,24 @@ struct BufferedPosition {
 };
 
 std::size_t flush_game(std::vector<BufferedPosition>& buffer, DatagenOutcome outcome,
-                       std::FILE* out) {
+                       std::FILE* out, const std::string& shardPath) {
     const std::size_t n = buffer.size();
     for (auto& bp : buffer) {
         apply_result(bp.rec, static_cast<Color>(bp.rec.stm), outcome);
-        std::fwrite(&bp.rec, sizeof(DatagenRecord), 1, out);
+        // fwrite returns the number of whole records written; anything short of
+        // 1 (a partial write or an I/O error) means the shard is now corrupt.
+        // Abort the whole run instead of continuing to emit a truncated shard.
+        if (std::fwrite(&bp.rec, sizeof(DatagenRecord), 1, out) != 1) {
+            const int         err = errno;
+            const std::string why =
+                err ? std::system_category().message(err) : "unknown error";
+            std::fprintf(stderr,
+                         "datagen: short write / I/O error writing shard '%s' "
+                         "(%s); aborting run rather than producing a corrupt shard\n",
+                         shardPath.c_str(), why.c_str());
+            std::fflush(stderr);
+            throw std::runtime_error("short write to shard: " + shardPath);
+        }
     }
     buffer.clear();
     return n;
@@ -196,7 +211,8 @@ bool play_one_game(Position& pos, Rng64& rng, const DatagenOptions& opts,
     for (;;) {
         const TerminalKind terminal = terminal_state(pos);
         if (terminal != TerminalKind::None) {
-            positions += flush_game(buffer, outcome_from_terminal(terminal), out);
+            positions += flush_game(buffer, outcome_from_terminal(terminal), out,
+                                    opts.outPath);
             return true;
         }
 
@@ -220,7 +236,7 @@ bool play_one_game(Position& pos, Rng64& rng, const DatagenOptions& opts,
             if (resignRun >= opts.resignPlies) {
                 positions += flush_game(buffer,
                                         outcome_from_resign(pos.side_to_move(), score),
-                                        out);
+                                        out, opts.outPath);
                 return true;
             }
         } else {
