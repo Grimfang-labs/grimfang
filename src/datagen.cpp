@@ -25,6 +25,11 @@ namespace {
 
 constexpr int SCORE_BLOWOUT_LIMIT = 3000;
 
+// Abort the run if this many games fail in a row. A persistently failing
+// play_one_game (e.g. every opening is degenerate, or the search never returns
+// a legal move) must not spin the completion loop forever.
+constexpr int MAX_CONSECUTIVE_FAILURES = 10000;
+
 // Simple 64-bit LCG for reproducible random opening moves.
 struct Rng64 {
     std::uint64_t state;
@@ -400,15 +405,26 @@ std::uint64_t run_datagen(const DatagenOptions& opts) {
     buffer.reserve(256);
 
     int           completed = 0;
+    int           consecutiveFailures = 0;
     std::uint64_t positions = 0;
     while (completed < opts.games) {
         if (play_one_game(pos, rng, opts, buffer, out, positions)) {
             ++completed;
+            consecutiveFailures = 0;
             if (opts.progress > 0 && completed % opts.progress == 0) {
                 std::cout << "shard progress: " << completed << " games, "
                           << positions << " positions\n";
                 std::cout.flush();
             }
+        } else if (++consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            // A persistently failing play_one_game would otherwise spin this
+            // loop forever without ever completing a game.
+            std::fclose(out);
+            throw std::runtime_error(
+                "datagen aborted: " + std::to_string(MAX_CONSECUTIVE_FAILURES)
+                + " consecutive game failures (last completed: "
+                + std::to_string(completed) + " of " + std::to_string(opts.games)
+                + ")");
         }
     }
 
