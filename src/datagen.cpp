@@ -6,7 +6,6 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -63,16 +62,6 @@ std::uint8_t piece_to_datagen(Piece pc) {
     const Color     c = color_of(pc);
     const PieceType t = type_of(pc);
     return static_cast<std::uint8_t>((c == WHITE ? 1 : 7) + static_cast<int>(t));
-}
-
-Piece datagen_to_piece(std::uint8_t p) {
-    if (p == 0)
-        return NO_PIECE;
-    if (p >= 1 && p <= 6)
-        return make_piece(WHITE, static_cast<PieceType>(p - 1));
-    if (p >= 7 && p <= 12)
-        return make_piece(BLACK, static_cast<PieceType>(p - 7));
-    return NO_PIECE;
 }
 
 std::uint8_t encode_castling(CastlingRights cr) {
