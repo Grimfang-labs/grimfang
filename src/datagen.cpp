@@ -154,6 +154,11 @@ DatagenOutcome outcome_from_resign(Color sideToMove, Value score) {
 Move pick_random_move(Position& pos, Rng64& rng) {
     MoveList list;
     generate_legal(pos, list);
+    // Guard against an empty move list before the modulo: a terminal position
+    // has no legal moves, and `next() % 0` is undefined behavior (divide by
+    // zero). Return MOVE_NONE and let the caller discard the game.
+    if (list.count == 0)
+        return MOVE_NONE;
     return list.moves[rng.bounded(list.count)];
 }
 
@@ -164,6 +169,8 @@ bool play_random_opening(Position& pos, Rng64& rng, int randomPlies) {
             return false;   // degenerate opening -> discard game
 
         const Move m = pick_random_move(pos, rng);
+        if (!m.is_ok())
+            return false;   // no legal move -> discard game
         pos.make_move(m);
     }
     return terminal_state(pos) == TerminalKind::None;
