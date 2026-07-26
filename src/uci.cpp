@@ -35,6 +35,46 @@ constexpr int HASH_DEFAULT = 16;
 constexpr int HASH_MIN     = 1;
 constexpr int HASH_MAX     = 1024;
 
+// ---------------------------------------------------------------------------
+// Search-tuning options (SPSA). Each maps a UCI `spin` option to a field of
+// Search::Tunables. Defaults are EXACTLY the engine's previous hardcoded
+// constants, so behavior is unchanged until an option is set. A `...Pct`
+// suffix means the stored value is divided by 100 (e.g. 150 == factor 1.5);
+// UCI spin options are integers with no description field, so the scale is
+// encoded in the name. Bounds are ~50-200% of the default, widened for the
+// hand-picked (never-tuned) aspiration values.
+// ---------------------------------------------------------------------------
+struct SpinOption {
+    const char*             name;
+    int Search::Tunables::* field;
+    int                     min;
+    int                     max;
+};
+
+const SpinOption kSpinOptions[] = {
+    // Aspiration windows (hand-picked workaround values, never tuned).
+    { "AspirationDelta",     &Search::Tunables::aspirationDelta,     20,   400  },
+    { "AspirationWidenPct",  &Search::Tunables::aspirationWidenPct,  101,  300  },
+    // Null-move pruning: R = NmpBase + depth / NmpDepthDiv.
+    { "NmpBase",             &Search::Tunables::nmpBase,             0,    6    },
+    { "NmpDepthDiv",         &Search::Tunables::nmpDepthDiv,         1,    6    },
+    // Reverse futility pruning (static null move).
+    { "RfpMaxDepth",         &Search::Tunables::rfpMaxDepth,         4,    16   },
+    { "RfpMargin",           &Search::Tunables::rfpMargin,           50,   200  },
+    // Late move reductions.
+    { "LmrMinDepth",         &Search::Tunables::lmrMinDepth,         2,    6    },
+    { "LmrMinMoveIndex",     &Search::Tunables::lmrMinMoveIndex,     1,    6    },
+    { "LmrDepth6Extra",      &Search::Tunables::lmrDepth6Extra,      0,    2    },
+    { "LmrDepth6At",         &Search::Tunables::lmrDepth6At,         4,    12   },
+    { "LmrDeepExtra",        &Search::Tunables::lmrDeepExtra,        0,    2    },
+    { "LmrDeepAt",           &Search::Tunables::lmrDeepAt,           6,    24   },
+    { "LmrPvReduction",      &Search::Tunables::lmrPvReduction,      0,    2    },
+    { "LmrKillerReduction",  &Search::Tunables::lmrKillerReduction,  0,    2    },
+    // History: bonus = min(depth*depth * HistoryBonusMultPct/100, HistoryBonusCap).
+    { "HistoryBonusMultPct", &Search::Tunables::historyBonusMultPct, 50,   200  },
+    { "HistoryBonusCap",     &Search::Tunables::historyBonusCap,     800,  3200 },
+};
+
 void run_perft(Position& pos, int depth) {
     using clock = std::chrono::steady_clock;
     const auto start = clock::now();
@@ -127,7 +167,9 @@ private:
             apply_moves(ss);
     }
 
-    // Parse `setoption name <Name> value <V>`. Only `Hash` is functional.
+    // Parse `setoption name <Name> value <V>`. `Hash` resizes the TT; the
+    // search-tuning spins update the live Search::Tunables (snapshotted per
+    // search). Unknown options are accepted and ignored.
     void cmd_setoption(std::istringstream& ss) {
         std::string token, name, value;
         if (!(ss >> token) || token != "name")
@@ -147,6 +189,23 @@ private:
             } catch (...) {
                 // Ignore a malformed value; keep the current table.
             }
+            return;
+        }
+
+        // Search-tuning spins: clamp into [min,max] and write the tunable.
+        for (const SpinOption& opt : kSpinOptions) {
+            if (name != opt.name)
+                continue;
+            try {
+                int v = std::stoi(value);
+                v = std::max(opt.min, std::min(opt.max, v));
+                Search::Tunables t = Search::active_tunables();
+                t.*opt.field = v;
+                Search::set_tunables(t);
+            } catch (...) {
+                // Ignore a malformed value; keep the current tunables.
+            }
+            return;
         }
         // Other options are accepted and ignored.
     }
@@ -201,8 +260,14 @@ void UciLoop::run() {
                 << "id author " << ENGINE_AUTHOR << '\n'
                 << "option name Hash type spin default " << HASH_DEFAULT
                 << " min " << HASH_MIN << " max " << HASH_MAX << '\n'
-                << "option name Threads type spin default 1 min 1 max 1\n"
-                << "uciok\n";
+                << "option name Threads type spin default 1 min 1 max 1\n";
+            // Search-tuning spins (defaults == previous hardcoded constants).
+            const Search::Tunables d;
+            for (const SpinOption& opt : kSpinOptions)
+                oss << "option name " << opt.name << " type spin default "
+                    << d.*opt.field << " min " << opt.min << " max " << opt.max
+                    << '\n';
+            oss << "uciok\n";
             sync_cout(oss.str());
         } else if (token == "isready") {
             // Answered while a search may be running -> must be line-atomic.

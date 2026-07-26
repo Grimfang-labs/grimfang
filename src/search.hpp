@@ -39,6 +39,54 @@ struct Result {
     std::uint64_t nodes    = 0;
 };
 
+// ---------------------------------------------------------------------------
+// Tunables - search constants exposed as UCI `spin` options for SPSA tuning.
+//
+// Every default is EXACTLY today's hardcoded value, so at defaults the search
+// is byte-identical to the pre-tuning engine (bench signature unchanged).
+//
+// Naming convention for scaled options: a `...Pct` suffix means "divide the
+// stored value by 100", so an option value of 150 represents the factor 1.5.
+// (UCI `spin` options are integers and carry no free-text description, so the
+// scale is encoded in the name; the exact formula is documented here and at
+// the point of use.)
+//
+// The active values are snapshotted into the Searcher ONCE per search via
+// active_tunables(); the hot path reads plain struct members, so there is no
+// per-node lookup and NPS is unaffected.
+// ---------------------------------------------------------------------------
+struct Tunables {
+    // Aspiration windows (ID driver).
+    int aspirationDelta     = 120;   // initial +/- window half-width (cp)
+    int aspirationWidenPct  = 150;   // widen factor on fail-high/low: delta = delta * pct / 100
+
+    // Null-move pruning: R = nmpBase + depth / nmpDepthDiv.
+    int nmpBase             = 3;     // constant reduction term
+    int nmpDepthDiv         = 3;     // depth divisor (>= 1)
+
+    // Reverse futility pruning (static null move).
+    int rfpMaxDepth         = 8;     // deepest ply RFP may fire
+    int rfpMargin           = 100;   // centipawns of margin per ply of remaining depth
+
+    // Late move reductions.
+    int lmrMinDepth         = 3;     // node depth at/above which LMR may reduce
+    int lmrMinMoveIndex     = 3;     // 0-based move index from which LMR may reduce
+    int lmrDepth6Extra      = 1;     // extra R once depth >= lmrDepth6At
+    int lmrDepth6At         = 6;     // depth threshold for lmrDepth6Extra
+    int lmrDeepExtra        = 1;     // extra R once move index >= lmrDeepAt
+    int lmrDeepAt           = 12;    // move-index threshold for lmrDeepExtra
+    int lmrPvReduction      = 1;     // R reduction applied at PV nodes
+    int lmrKillerReduction  = 1;     // R reduction applied to killer moves
+
+    // History heuristic: bonus = min(mult * depth * depth / 100, cap).
+    int historyBonusMultPct = 100;   // bonus multiplier, percent (100 == 1.0)
+    int historyBonusCap     = 1600;  // clamp on the depth-scaled bonus
+};
+
+// The live tunable values, updated by UCI `setoption` (see uci.cpp).
+const Tunables& active_tunables();
+void            set_tunables(const Tunables& t);
+
 // Iterative-deepening driver. Emits a UCI `info` line per completed iteration
 // and prints `bestmove <move>` exactly once when it returns. `stop` aborts the
 // search asynchronously; the best move from the last completed iteration is
