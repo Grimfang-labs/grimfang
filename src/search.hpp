@@ -71,6 +71,7 @@ struct Tunables {
     // Late move reductions.
     int lmrMinDepth         = 3;     // node depth at/above which LMR may reduce
     int lmrMinMoveIndex     = 3;     // 0-based move index from which LMR may reduce
+    int lmrBaseReduction    = 1;     // starting R for an eligible late quiet move
     int lmrDepth6Extra      = 1;     // extra R once depth >= lmrDepth6At
     int lmrDepth6At         = 6;     // depth threshold for lmrDepth6Extra
     int lmrDeepExtra        = 1;     // extra R once move index >= lmrDeepAt

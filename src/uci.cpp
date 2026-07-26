@@ -64,6 +64,7 @@ const SpinOption kSpinOptions[] = {
     // Late move reductions.
     { "LmrMinDepth",         &Search::Tunables::lmrMinDepth,         2,    6    },
     { "LmrMinMoveIndex",     &Search::Tunables::lmrMinMoveIndex,     1,    6    },
+    { "LmrBaseReduction",    &Search::Tunables::lmrBaseReduction,    0,    2    },
     { "LmrDepth6Extra",      &Search::Tunables::lmrDepth6Extra,      0,    2    },
     { "LmrDepth6At",         &Search::Tunables::lmrDepth6At,         4,    12   },
     { "LmrDeepExtra",        &Search::Tunables::lmrDeepExtra,        0,    2    },

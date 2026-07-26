@@ -508,7 +508,7 @@ private:
                     && !isTtMove
                     && !inCheck
                     && !givesCheck) {
-                    R = 1;
+                    R = t_.lmrBaseReduction;
                     if (depth >= t_.lmrDepth6At) R += t_.lmrDepth6Extra;
                     if (i >= t_.lmrDeepAt)       R += t_.lmrDeepExtra;
                     if (pvNode)                  R = std::max(R - t_.lmrPvReduction, 0);
