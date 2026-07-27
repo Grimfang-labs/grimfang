@@ -41,3 +41,6 @@ Release/
 # Editor noise
 *.swp
 .DS_Store
+
+# SPSA run artifacts
+tools/spsa/
