@@ -46,18 +46,19 @@ constexpr int CAPTURE_BONUS   = 1'000'000;
 constexpr int PROMOTION_BONUS =   900'000;
 constexpr int TT_MOVE_BONUS   = 10'000'000;   // root previous-best move
 
-// Reverse futility pruning (static null move): only at shallow depths, and
-// only when the static eval clears beta by a per-ply margin.
-constexpr int RFP_MAX_DEPTH = 8;
-constexpr int RFP_MARGIN    = 100;   // centipawns per ply of remaining depth
-
-// Late move reductions: search late quiet moves at reduced depth first, verify
-// at full depth if the reduced scout beats alpha (PVS re-search unchanged).
-constexpr int LMR_MIN_DEPTH      = 3;
-constexpr int LMR_MIN_MOVE_INDEX   = 3;   // 0-based: 4th move onward
-
 // Poll the stop conditions roughly every this many nodes.
 constexpr std::uint64_t POLL_INTERVAL = 2048;
+
+// ---------------------------------------------------------------------------
+// Live tunables. Defaults are exactly the previously hardcoded constants, so
+// the search is byte-identical until a UCI `setoption` changes a value. The
+// Searcher snapshots these once per search (see Searcher::iterate); the
+// per-node hot path reads only the snapshot's plain members.
+//
+// The RFP / LMR / NMP / aspiration / history constants that used to live here
+// as file-scope `constexpr`s are now fields of Search::Tunables (search.hpp).
+// ---------------------------------------------------------------------------
+Search::Tunables g_tunables;
 
 using Clock = std::chrono::steady_clock;
 
@@ -79,6 +80,11 @@ public:
         seldepth_  = 0;
         aborted_   = false;
         startTime_ = Clock::now();
+
+        // Snapshot the live tunables ONCE for this whole search. Every node
+        // then reads plain struct members (t_.*) -- no global lookup, no
+        // indirection, so NPS is unaffected by exposing these as options.
+        t_ = Search::active_tunables();
 
         // One search == one generation. Entries from earlier searches stay in
         // the table but age out under replacement. Killers and history are
@@ -118,18 +124,21 @@ public:
                 break;
 
             // Aspiration: from depth 4 onward, search a narrow window around the
-            // previous iteration's score. Fail-high / fail-low widen (~1.5x from
-            // the fail-soft score) and re-search the same depth. Depths < 4 and
+            // previous iteration's score. Fail-high / fail-low widen (by the
+            // factor t_.aspirationWidenPct/100, ~1.5x at default) from the
+            // fail-soft score and re-search the same depth. Depths < 4 and
             // near-mate prev scores keep the full window. Widening is monotonic
             // and capped at ±VALUE_INFINITE.
             //
-            // Initial δ=120 (not classic 20): against this NNUE, shallow ID scores
-            // routinely swing outside ±20, and gradual widening from 20 thrashed
-            // (bench +20% nodes). δ=120 still tightens vs ±INF and drops nodes
-            // at bench depths 6/8/10 vs the full-window baseline.
+            // Initial δ (t_.aspirationDelta, default 120, not classic 20): against
+            // this NNUE, shallow ID scores routinely swing outside ±20, and
+            // gradual widening from 20 thrashed (bench +20% nodes). δ=120 still
+            // tightens vs ±INF and drops nodes at bench depths 6/8/10 vs the
+            // full-window baseline. Both δ and the widen factor are hand-picked
+            // workaround values, never tuned -- hence exposed as options.
             Value alpha = -VALUE_INFINITE;
             Value beta  = VALUE_INFINITE;
-            Value delta = 120;
+            Value delta = t_.aspirationDelta;
             if (limits.aspiration
                 && depth >= 4
                 && havePrev
@@ -148,11 +157,13 @@ public:
                 if (score <= alpha) {
                     // Fail low: widen down around the returned score. Stay silent.
                     alpha = std::max<Value>(score - delta, -VALUE_INFINITE);
-                    delta += delta / 2;
+                    // Grow monotonically (>= +1) so the window always expands and
+                    // the loop terminates even if the widen factor is set <= 100%.
+                    delta = std::max<Value>(delta * t_.aspirationWidenPct / 100, delta + 1);
                 } else if (score >= beta) {
                     // Fail high: widen up around the returned score. Stay silent.
                     beta  = std::min<Value>(score + delta, VALUE_INFINITE);
-                    delta += delta / 2;
+                    delta = std::max<Value>(delta * t_.aspirationWidenPct / 100, delta + 1);
                 } else {
                     break;   // score inside window: exact for this depth
                 }
@@ -200,6 +211,9 @@ private:
     std::uint64_t      limitNodes_ = 0;
     int                seldepth_   = 0;
     bool               aborted_    = false;
+
+    // Per-search snapshot of the live tunables (see iterate()).
+    Search::Tunables   t_;
 
     Clock::time_point startTime_;
     bool              useTime_ = false;
@@ -419,9 +433,9 @@ private:
         if (!pvNode
             && !inCheck
             && ply > 0
-            && depth <= RFP_MAX_DEPTH
+            && depth <= t_.rfpMaxDepth
             && std::abs(beta) < VALUE_MATE_IN_MAX_PLY
-            && staticEval - RFP_MARGIN * depth >= beta) {
+            && staticEval - t_.rfpMargin * depth >= beta) {
             return staticEval;
         }
 
@@ -437,7 +451,7 @@ private:
             && !prevWasNull
             && pos.has_non_pawn_material(pos.side_to_move())
             && staticEval >= beta) {
-            const int R = 3 + depth / 3;
+            const int R = t_.nmpBase + depth / t_.nmpDepthDiv;
             pos.do_null_move();
             const Value v = -negamax(pos, depth - 1 - R, -beta, -beta + 1, ply + 1,
                                      /*pvNode=*/false, /*prevWasNull=*/true);
@@ -488,17 +502,17 @@ private:
                                  /*prevWasNull=*/false);
             } else {
                 int R = 0;
-                if (depth >= LMR_MIN_DEPTH
-                    && i >= LMR_MIN_MOVE_INDEX
+                if (depth >= t_.lmrMinDepth
+                    && i >= t_.lmrMinMoveIndex
                     && isQuiet
                     && !isTtMove
                     && !inCheck
                     && !givesCheck) {
-                    R = 1;
-                    if (depth >= 6) R += 1;
-                    if (i >= 12)     R += 1;
-                    if (pvNode)      R = std::max(R - 1, 0);
-                    if (isKiller)    R = std::max(R - 1, 0);
+                    R = t_.lmrBaseReduction;
+                    if (depth >= t_.lmrDepth6At) R += t_.lmrDepth6Extra;
+                    if (i >= t_.lmrDeepAt)       R += t_.lmrDeepExtra;
+                    if (pvNode)                  R = std::max(R - t_.lmrPvReduction, 0);
+                    if (isKiller)                R = std::max(R - t_.lmrKillerReduction, 0);
                     R = std::min(R, newDepth - 1);
                 }
 
@@ -544,7 +558,8 @@ private:
                             killers_.update(ply, m);
 
                             const Color stm   = pos.side_to_move();
-                            const int   bonus = history_bonus(depth);
+                            const int   bonus = history_bonus(
+                                depth, t_.historyBonusMultPct, t_.historyBonusCap);
                             history_.update(stm, m, bonus);
                             for (int j = 0; j < i; ++j)
                                 if (is_quiet_move(pos, list.moves[j]))
@@ -676,4 +691,12 @@ std::uint64_t Search::bench(int depth) {
     std::cout << "Nodes/second    : " << nps << std::endl;
 
     return totalNodes;
+}
+
+const Search::Tunables& Search::active_tunables() {
+    return g_tunables;
+}
+
+void Search::set_tunables(const Tunables& t) {
+    g_tunables = t;
 }

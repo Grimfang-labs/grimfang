@@ -26,9 +26,13 @@ constexpr int MAX_HISTORY       = 16384;
 // Clamp on the depth-scaled bonus (depth*depth), keeping single updates small.
 constexpr int HISTORY_BONUS_CAP = 1600;
 
-inline int history_bonus(int depth) {
-    const int b = depth * depth;
-    return b < HISTORY_BONUS_CAP ? b : HISTORY_BONUS_CAP;
+// Depth-scaled quiet-cutoff bonus, clamped to a cap. The multiplier is a
+// percentage (100 == 1.0) so it can be exposed as an integer UCI option; the
+// defaults (multPct=100, cap=HISTORY_BONUS_CAP) reproduce the original
+// min(depth*depth, 1600) exactly.
+inline int history_bonus(int depth, int multPct = 100, int cap = HISTORY_BONUS_CAP) {
+    const int b = depth * depth * multPct / 100;
+    return b < cap ? b : cap;
 }
 
 struct HistoryTable {
