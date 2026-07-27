@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import json
 import random
 import subprocess
@@ -55,7 +56,8 @@ BOOK = ROOT / "tools" / "books" / "8moves_v3.epd"
 WORKDIR = ROOT / "tools" / "spsa"
 STATE_FILE = WORKDIR / "spsa_state.json"
 CSV_LOG = WORKDIR / "spsa_log.csv"
-PGN_TMP = WORKDIR / "iter.pgn"
+HEARTBEAT = WORKDIR / "heartbeat.json"
+PGN_DIR = WORKDIR / "pgn"
 
 # --------------------------------------------------------------------------
 # Match settings. HASH_MB must match whatever you use for the Batch B SPRTs,
@@ -142,6 +144,27 @@ _pgnout_style = "file="   # auto-downgraded to bare path if fastchess rejects it
 # Helpers
 # --------------------------------------------------------------------------
 
+def log(msg: str) -> None:
+    """Always flush. Redirected stdout is block-buffered otherwise, which makes
+    a running job look frozen for ~40 iterations at a time."""
+    print(msg, flush=True)
+
+
+def beat(iteration: int, phase: str, games: int) -> None:
+    """Write a timestamped heartbeat. Closed immediately, so its mtime is an
+    unbuffered ground truth for 'is this thing alive'."""
+    try:
+        HEARTBEAT.write_text(json.dumps({
+            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "iter": iteration,
+            "phase": phase,
+            "games_played": games,
+            "pid": os.getpid(),
+        }, indent=2))
+    except OSError:
+        pass
+
+
 def clamp(name: str, value: float) -> float:
     p = PARAMS[name]
     return max(p["min"], min(p["max"], value))
@@ -161,7 +184,19 @@ def engine_args(name: str, values: dict[str, int]) -> list[str]:
     return args
 
 
-def build_cmd(plus: dict[str, int], minus: dict[str, int], seed: int) -> list[str]:
+def pgn_path(k: int) -> Path:
+    """One PGN per iteration.
+
+    Windows holds the handle on a just-written file for a short, unpredictable
+    window after the writing process exits (engine children, Defender's on-write
+    scan). Reusing one filename means an unlink racing that window kills the run.
+    Unique names remove the race entirely; cleanup is best-effort.
+    """
+    return PGN_DIR / f"iter_{k:06d}.pgn"
+
+
+def build_cmd(plus: dict[str, int], minus: dict[str, int], seed: int,
+              pgn: Path) -> list[str]:
     cmd = [str(FASTCHESS)]
     cmd += engine_args("plus", plus)
     cmd += engine_args("minus", minus)
@@ -173,9 +208,9 @@ def build_cmd(plus: dict[str, int], minus: dict[str, int], seed: int) -> list[st
         cmd += ["-srand", str(seed)]
     cmd += EXTRA_ARGS
     if _pgnout_style == "file=":
-        cmd += ["-pgnout", f"file={PGN_TMP}"]
+        cmd += ["-pgnout", f"file={pgn}"]
     else:
-        cmd += ["-pgnout", str(PGN_TMP)]
+        cmd += ["-pgnout", str(pgn)]
     return cmd
 
 
@@ -219,34 +254,64 @@ def score_pgn(path: Path) -> tuple[float, float, int]:
     return plus, minus, games
 
 
-def play(plus: dict[str, int], minus: dict[str, int], seed: int) -> tuple[float, int]:
-    """Play one iteration's games. Return (net_result_for_plus, games)."""
+def play(plus: dict[str, int], minus: dict[str, int], k: int) -> tuple[float, int]:
+    """Play one iteration's games. Return (net_result_for_plus, games).
+
+    Retries transient failures. A multi-day background run must not die because
+    a virus scanner held a file handle for 200ms.
+    """
     global _pgnout_style
 
-    PGN_TMP.unlink(missing_ok=True)
-    cmd = build_cmd(plus, minus, seed)
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-
-    if proc.returncode != 0 and _pgnout_style == "file=":
-        # Older fastchess builds want a bare path after -pgnout.
-        _pgnout_style = "bare"
-        PGN_TMP.unlink(missing_ok=True)
-        cmd = build_cmd(plus, minus, seed)
+    last_err = ""
+    for attempt in range(3):
+        pgn = pgn_path(k) if attempt == 0 else PGN_DIR / f"iter_{k:06d}_r{attempt}.pgn"
+        cmd = build_cmd(plus, minus, k, pgn)
         proc = subprocess.run(cmd, capture_output=True, text=True)
 
-    if proc.returncode != 0 or not PGN_TMP.exists():
-        print("\nfastchess failed. Command was:\n  " + " ".join(cmd), file=sys.stderr)
-        print("\n--- stdout ---\n" + proc.stdout[-3000:], file=sys.stderr)
-        print("\n--- stderr ---\n" + proc.stderr[-3000:], file=sys.stderr)
-        sys.exit(1)
+        if proc.returncode != 0 and _pgnout_style == "file=" and attempt == 0:
+            # Older fastchess builds want a bare path after -pgnout.
+            _pgnout_style = "bare"
+            cmd = build_cmd(plus, minus, k, pgn)
+            proc = subprocess.run(cmd, capture_output=True, text=True)
 
-    p, m, games = score_pgn(PGN_TMP)
-    if games == 0:
-        print("\nNo completed games parsed from PGN. Command was:\n  "
-              + " ".join(cmd), file=sys.stderr)
-        sys.exit(1)
+        if proc.returncode == 0 and pgn.exists():
+            try:
+                p, m, games = score_pgn(pgn)
+            except OSError as exc:
+                last_err = f"could not read PGN: {exc}"
+                time.sleep(2.0)
+                continue
+            if games > 0:
+                cleanup_pgn(k)
+                return (p - m) / games, games
+            last_err = "no completed games parsed from PGN"
+        else:
+            last_err = (f"fastchess rc={proc.returncode}\n"
+                        f"--- stdout ---\n{proc.stdout[-2000:]}\n"
+                        f"--- stderr ---\n{proc.stderr[-2000:]}")
 
-    return (p - m) / games, games
+        print(f"  [iter {k}] attempt {attempt + 1} failed: {last_err.splitlines()[0]}",
+              flush=True)
+        time.sleep(5.0)
+
+    print(f"\nIteration {k} failed 3 times. Command was:\n  " + " ".join(cmd),
+          file=sys.stderr)
+    print(last_err, file=sys.stderr)
+    sys.exit(1)
+
+
+def cleanup_pgn(k: int, keep: int = 3) -> None:
+    """Best-effort removal of PGNs older than the last `keep` iterations."""
+    for old in PGN_DIR.glob("iter_*.pgn"):
+        try:
+            n = int(old.stem.split("_")[1])
+        except (IndexError, ValueError):
+            continue
+        if n <= k - keep:
+            try:
+                old.unlink()
+            except OSError:
+                pass  # still locked; next iteration will get it
 
 
 def preflight() -> None:
@@ -256,10 +321,43 @@ def preflight() -> None:
             print(f"NOT FOUND: {p}", file=sys.stderr)
         sys.exit(1)
     WORKDIR.mkdir(parents=True, exist_ok=True)
+    PGN_DIR.mkdir(parents=True, exist_ok=True)
     for name, p in PARAMS.items():
         if not (p["min"] <= p["start"] <= p["max"]):
             print(f"{name}: start outside [min, max]", file=sys.stderr)
             sys.exit(1)
+
+
+def show_status() -> None:
+    """Read state + heartbeat and report. Safe to run while a tune is going."""
+    if not STATE_FILE.exists():
+        log("No run found (no spsa_state.json).")
+        return
+    st = json.loads(STATE_FILE.read_text())
+    k = int(st["iter"])
+    age = time.time() - STATE_FILE.stat().st_mtime
+    health = "RUNNING" if age < 300 else f"STALE (no update for {age / 60:.0f} min)"
+
+    log(f"iteration {k}/{TOTAL_ITERS}   {100 * k / TOTAL_ITERS:.1f}%   [{health}]")
+    log(f"games played  {k * 2 * PAIRS_PER_ITER}")
+
+    if HEARTBEAT.exists():
+        hb = json.loads(HEARTBEAT.read_text())
+        log(f"heartbeat     {hb['ts']}  phase={hb['phase']}  pid={hb['pid']}")
+
+    log("")
+    log(f"{'parameter':<22}{'now':>6}{'start':>7}{'drift':>8}   {'% of range':>10}")
+    for n in NAMES:
+        cur = st["theta"][n]
+        start = PARAMS[n]["start"]
+        rng = PARAMS[n]["max"] - PARAMS[n]["min"]
+        pct = 100.0 * (cur - start) / rng
+        flag = ""
+        if abs(cur - PARAMS[n]["min"]) < 0.5:
+            flag = "  <-- PINNED at min"
+        elif abs(cur - PARAMS[n]["max"]) < 0.5:
+            flag = "  <-- PINNED at max"
+        log(f"{n:<22}{cur:>6.0f}{start:>7.0f}{cur - start:>+8.1f}   {pct:>+9.1f}%{flag}")
 
 
 # --------------------------------------------------------------------------
@@ -272,9 +370,17 @@ def main() -> None:
                     help="stop after this many NEW iterations (smoke testing)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the iteration-0 command line and exit")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="log the perturbed option sets and per-phase timing")
+    ap.add_argument("--status", action="store_true",
+                    help="print progress and exit; starts nothing")
     args = ap.parse_args()
 
     preflight()
+
+    if args.status:
+        show_status()
+        return
 
     theta = {n: float(PARAMS[n]["start"]) for n in NAMES}
     k0 = 0
@@ -284,14 +390,14 @@ def main() -> None:
             if n in saved["theta"]:
                 theta[n] = float(saved["theta"][n])
         k0 = int(saved["iter"])
-        print(f"Resuming from iteration {k0}.")
+        log(f"Resuming from iteration {k0}.")
 
     if args.dry_run:
         rng = random.Random(k0)
         d = {n: rng.choice((-1, 1)) for n in NAMES}
         plus = {n: int(round(clamp(n, theta[n] + c_k(n, k0) * d[n]))) for n in NAMES}
         minus = {n: int(round(clamp(n, theta[n] - c_k(n, k0) * d[n]))) for n in NAMES}
-        print(" ".join(build_cmd(plus, minus, k0)))
+        print(" ".join(build_cmd(plus, minus, k0, pgn_path(k0))))
         return
 
     if not CSV_LOG.exists():
@@ -312,14 +418,25 @@ def main() -> None:
 
         pinned = [n for n in NAMES if plus[n] == minus[n]]
         if pinned:
-            print(f"  [iter {k}] pinned at a bound, no signal this iter: "
-                  + ", ".join(pinned))
+            log(f"  [iter {k}] pinned at a bound, no signal this iter: "
+                + ", ".join(pinned))
         if len(pinned) == len(NAMES):
             print("All parameters pinned -- ranges are wrong. Stopping.", file=sys.stderr)
             sys.exit(1)
 
+        if args.verbose:
+            log(f"  [iter {k}] plus : "
+                + " ".join(f"{n}={plus[n]}" for n in NAMES))
+            log(f"  [iter {k}] minus: "
+                + " ".join(f"{n}={minus[n]}" for n in NAMES))
+            log(f"  [iter {k}] playing {2 * PAIRS_PER_ITER} games at {TC} ...")
+
+        beat(k, "playing", total_games)
+        t_iter = time.time()
         net, games = play(plus, minus, k)
+        secs = time.time() - t_iter
         total_games += games
+        beat(k + 1, "idle", total_games)
 
         for n in NAMES:
             theta[n] = clamp(n, theta[n] + a_k(n, k) / ck[n] * net * d[n])
@@ -334,12 +451,12 @@ def main() -> None:
         done = k - k0 + 1
         eta_h = (elapsed / done) * (stop_at - k - 1) / 3600.0
         rounded = {n: int(round(theta[n])) for n in NAMES}
-        print(f"[{k + 1}/{stop_at}] games={total_games} net={net:+.3f} "
-              f"eta={eta_h:.1f}h  {rounded}")
+        log(f"[{k + 1}/{stop_at}] games={total_games} net={net:+.3f} "
+            f"{secs:.0f}s eta={eta_h:.1f}h  {rounded}")
 
-    print("\nFinal theta (rounded -- these become your new defaults):")
+    log("\nFinal theta (rounded -- these become your new defaults):")
     for n in NAMES:
-        print(f"  {n:<22} {int(round(theta[n]))}   (was {int(PARAMS[n]['start'])})")
+        log(f"  {n:<22} {int(round(theta[n])):>5}   (was {int(PARAMS[n]['start'])})")
 
 
 if __name__ == "__main__":
