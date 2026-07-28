@@ -1,15 +1,15 @@
 {
     "resign": {
-        "move_count": 3,
-        "score": 600,
+        "move_count": 1,
+        "score": 0,
         "twosided": false,
-        "enabled": true
+        "enabled": false
     },
     "draw": {
-        "move_number": 40,
-        "move_count": 8,
-        "score": 10,
-        "enabled": true
+        "move_number": 0,
+        "move_count": 1,
+        "score": 0,
+        "enabled": false
     },
     "maxmoves": {
         "move_count": 1,
@@ -22,7 +22,7 @@
         "enabled": false
     },
     "opening": {
-        "file": "C:\\users\\shywolf91\\dev\\grimfang\\grimfang\\tools\\books\\8moves_v3.epd",
+        "file": "C:\\Users\\shywolf91\\Dev\\Grimfang\\grimfang\\tools\\books\\8moves_v3.epd",
         "format": 0,
         "order": 0,
         "plies": -1,
@@ -32,7 +32,7 @@
         "additional_lines_rgx": [],
         "event_name": "Fastchess Tournament",
         "site": "?",
-        "file": "tools/out.pgn",
+        "file": "C:\\Users\\shywolf91\\Dev\\Grimfang\\grimfang\\tools\\spsa\\pgn\\iter_001509.pgn",
         "notation": 0,
         "append_file": true,
         "track_nodes": false,
@@ -51,16 +51,16 @@
         "append_file": true
     },
     "sprt": {
-        "alpha": 0.05,
-        "beta": 0.05,
+        "alpha": 0.0,
+        "beta": 0.0,
         "elo0": 0.0,
-        "elo1": 5.0,
+        "elo1": 0.0,
         "model": "normalized",
-        "enabled": true
+        "enabled": false
     },
     "config_name": "config.json",
     "output": 0,
-    "seed": 15123207267872505387,
+    "seed": 1509,
     "variant": 0,
     "type": 0,
     "gauntlet_seeds": 1,
@@ -69,8 +69,8 @@
     "wait": 0,
     "autosaveinterval": 20,
     "games": 2,
-    "rounds": 20000,
-    "concurrency": 10,
+    "rounds": 8,
+    "concurrency": 6,
     "force_concurrency": false,
     "recover": true,
     "noswap": false,
@@ -79,7 +79,7 @@
     "affinity": false,
     "show_latency": false,
     "log": {
-        "file": "tools/fastchess.log",
+        "file": "",
         "level": 2,
         "append_file": true,
         "compress": false,
@@ -88,19 +88,51 @@
     },
     "engines": [
         {
-            "name": "new",
+            "name": "plus",
             "dir": "",
-            "cmd": "C:\\users\\shywolf91\\dev\\grimfang\\grimfang\\tools\\grimfang-failsoft.exe",
+            "cmd": "C:\\Users\\shywolf91\\Dev\\Grimfang\\grimfang\\build\\Release\\grimfang.exe",
             "args": "",
             "restart": false,
             "options": [
                 [
-                    "Hash",
-                    "16"
+                    "AspirationDelta",
+                    "139"
                 ],
                 [
-                    "Threads",
-                    "1"
+                    "AspirationWidenPct",
+                    "138"
+                ],
+                [
+                    "RfpMargin",
+                    "99"
+                ],
+                [
+                    "RfpMaxDepth",
+                    "6"
+                ],
+                [
+                    "LmrMinDepth",
+                    "2"
+                ],
+                [
+                    "LmrMinMoveIndex",
+                    "2"
+                ],
+                [
+                    "LmrDepth6At",
+                    "7"
+                ],
+                [
+                    "LmrDeepAt",
+                    "12"
+                ],
+                [
+                    "HistoryBonusMultPct",
+                    "91"
+                ],
+                [
+                    "Hash",
+                    "64"
                 ]
             ],
             "limit": {
@@ -117,19 +149,51 @@
             "variant": 0
         },
         {
-            "name": "base",
+            "name": "minus",
             "dir": "",
-            "cmd": "C:\\users\\shywolf91\\dev\\grimfang\\grimfang\\tools\\grimfang-base.exe",
+            "cmd": "C:\\Users\\shywolf91\\Dev\\Grimfang\\grimfang\\build\\Release\\grimfang.exe",
             "args": "",
             "restart": false,
             "options": [
                 [
-                    "Hash",
-                    "16"
+                    "AspirationDelta",
+                    "97"
                 ],
                 [
-                    "Threads",
-                    "1"
+                    "AspirationWidenPct",
+                    "160"
+                ],
+                [
+                    "RfpMargin",
+                    "82"
+                ],
+                [
+                    "RfpMaxDepth",
+                    "11"
+                ],
+                [
+                    "LmrMinDepth",
+                    "3"
+                ],
+                [
+                    "LmrMinMoveIndex",
+                    "5"
+                ],
+                [
+                    "LmrDepth6At",
+                    "2"
+                ],
+                [
+                    "LmrDeepAt",
+                    "7"
+                ],
+                [
+                    "HistoryBonusMultPct",
+                    "109"
+                ],
+                [
+                    "Hash",
+                    "64"
                 ]
             ],
             "limit": {
@@ -147,16 +211,16 @@
         }
     ],
     "stats": {
-        "new vs base": {
-            "wins": 188,
-            "losses": 250,
-            "draws": 574,
-            "penta_WW": 11,
-            "penta_WD": 115,
-            "penta_WL": 51,
-            "penta_DD": 162,
-            "penta_LD": 135,
-            "penta_LL": 32
+        "plus vs minus": {
+            "wins": 3,
+            "losses": 4,
+            "draws": 9,
+            "penta_WW": 0,
+            "penta_WD": 1,
+            "penta_WL": 2,
+            "penta_DD": 3,
+            "penta_LD": 2,
+            "penta_LL": 0
         }
     }
 }

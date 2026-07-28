@@ -64,13 +64,13 @@ const SpinOption kSpinOptions[] = {
     // Late move reductions.
     { "LmrMinDepth",         &Search::Tunables::lmrMinDepth,         2,    6    },
     { "LmrMinMoveIndex",     &Search::Tunables::lmrMinMoveIndex,     1,    6    },
-    { "LmrBaseReduction",    &Search::Tunables::lmrBaseReduction,    0,    2    },
-    { "LmrDepth6Extra",      &Search::Tunables::lmrDepth6Extra,      0,    2    },
+    { "LmrBaseReduction",    &Search::Tunables::lmrBaseReduction,    0,    4    },
+    { "LmrDepth6Extra",      &Search::Tunables::lmrDepth6Extra,      0,    4    },
     { "LmrDepth6At",         &Search::Tunables::lmrDepth6At,         4,    12   },
-    { "LmrDeepExtra",        &Search::Tunables::lmrDeepExtra,        0,    2    },
+    { "LmrDeepExtra",        &Search::Tunables::lmrDeepExtra,        0,    4    },
     { "LmrDeepAt",           &Search::Tunables::lmrDeepAt,           6,    24   },
-    { "LmrPvReduction",      &Search::Tunables::lmrPvReduction,      0,    2    },
-    { "LmrKillerReduction",  &Search::Tunables::lmrKillerReduction,  0,    2    },
+    { "LmrPvReduction",      &Search::Tunables::lmrPvReduction,      0,    4    },
+    { "LmrKillerReduction",  &Search::Tunables::lmrKillerReduction,  0,    4    },
     // History: bonus = min(depth*depth * HistoryBonusMultPct/100, HistoryBonusCap).
     { "HistoryBonusMultPct", &Search::Tunables::historyBonusMultPct, 50,   200  },
     { "HistoryBonusCap",     &Search::Tunables::historyBonusCap,     800,  3200 },

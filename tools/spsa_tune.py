@@ -130,7 +130,7 @@ PARAMS: dict[str, dict[str, float]] = {
     "RfpMaxDepth":         {"start":   8, "min":   4, "max":  16, "c_end":  2},
     "LmrMinDepth":         {"start":   3, "min":   2, "max":   6, "c_end":  1},
     "LmrMinMoveIndex":     {"start":   3, "min":   1, "max":   6, "c_end":  1},
-    "LmrDepth6At":         {"start":   6, "min":   4, "max":  12, "c_end":  1},
+    "LmrDepth6At":         {"start":   6, "min":   2, "max":  12, "c_end":  2},
     "LmrDeepAt":           {"start":  12, "min":   6, "max":  24, "c_end":  2},
     "HistoryBonusMultPct": {"start": 100, "min":  50, "max": 200, "c_end":  8},
 }
