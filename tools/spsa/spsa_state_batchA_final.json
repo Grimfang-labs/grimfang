@@ -1,0 +1,15 @@
+{
+  "iter": 2820,
+  "theta": {
+    "AspirationDelta": 113.15943486172651,
+    "AspirationWidenPct": 147.9322398018467,
+    "RfpMargin": 88.88550587932612,
+    "RfpMaxDepth": 8.972385487056902,
+    "LmrMinDepth": 2.388092699285563,
+    "LmrMinMoveIndex": 3.3975137419542927,
+    "LmrDepth6At": 4.37177244158573,
+    "LmrDeepAt": 9.223871631000153,
+    "HistoryBonusMultPct": 101.73878415150425
+  },
+  "total_iters": 4000
+}
