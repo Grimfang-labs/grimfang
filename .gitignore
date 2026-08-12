@@ -44,3 +44,7 @@ Release/
 
 # SPSA run artifacts
 tools/spsa/
+
+/workspace/
+tools/pgn/
+tools/logs/
