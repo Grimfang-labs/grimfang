@@ -12,6 +12,18 @@ REPO_DIR="${GRIMFANG_DIR:-$DATA_DIR/grimfang}"
 REPO_URL="${GRIMFANG_REPO:-https://github.com/grimfang-labs/grimfang.git}"
 BRANCH="${GRIMFANG_BRANCH:-main}"
 
+# --- Secrets: QuickPod and similar hosts mount secrets as read-only FILES
+# under /run/secrets, not as environment variables. Load them so GH_TOKEN and
+# friends behave the way the rest of the tooling expects.
+for _sf in /run/secrets/*; do
+    [[ -f "$_sf" ]] || continue
+    _sn=$(basename "$_sf")
+    [[ -n "${!_sn:-}" ]] && continue          # an explicit env var wins
+    export "$_sn=$(tr -d '[:space:]' < "$_sf")"
+    log "loaded secret $_sn"
+done
+unset _sf _sn
+
 # --- SSH: marketplaces differ on which variable carries the injected key -----
 KEY="${PUBLIC_KEY:-${SSH_PUBLIC_KEY:-${SSH_KEY:-${AUTHORIZED_KEYS:-}}}}"
 if [[ -n "$KEY" ]]; then
