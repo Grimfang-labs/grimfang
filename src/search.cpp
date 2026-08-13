@@ -513,7 +513,13 @@ private:
                     if (i >= t_.lmrDeepAt)       R += t_.lmrDeepExtra;
                     if (pvNode)                  R = std::max(R - t_.lmrPvReduction, 0);
                     if (isKiller)                R = std::max(R - t_.lmrKillerReduction, 0);
-                    R = std::min(R, newDepth - 1);
+                    // Clamp on the REDUCED depth only; the sole activation
+                    // threshold is `depth >= t_.lmrMinDepth` above. Never
+                    // reduce below depth 0: at newDepth == 1 (reachable only
+                    // with LmrMinDepth == 2) the probe may be a depth-0
+                    // quiescence search. At newDepth >= 2 keep the historical
+                    // probe floor of depth 1, so defaults are bit-identical.
+                    R = std::min(R, std::max(newDepth - 1, 1));
                 }
 
                 if (R > 0) {
