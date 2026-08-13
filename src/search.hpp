@@ -68,14 +68,11 @@ struct Tunables {
     int rfpMaxDepth         = 8;     // deepest ply RFP may fire
     int rfpMargin           = 100;   // centipawns of margin per ply of remaining depth
 
-    // Late move reductions.
+    // Late move reductions (log table: base/100 + log(d)*log(m) / (divisor/100)).
     int lmrMinDepth         = 3;     // node depth at/above which LMR may reduce
     int lmrMinMoveIndex     = 3;     // 0-based move index from which LMR may reduce
-    int lmrBaseReduction    = 3;     // starting R for an eligible late quiet move
-    int lmrDepth6Extra      = 1;     // extra R once depth >= lmrDepth6At
-    int lmrDepth6At         = 6;     // depth threshold for lmrDepth6Extra
-    int lmrDeepExtra        = 1;     // extra R once move index >= lmrDeepAt
-    int lmrDeepAt           = 12;    // move-index threshold for lmrDeepExtra
+    int lmrBase             = 75;    // constant term, units of 1/100 (default 0.75)
+    int lmrDivisor          = 220;   // log scale divisor, units of 1/100 (default 2.20)
     int lmrPvReduction      = 1;     // R reduction applied at PV nodes
     int lmrKillerReduction  = 1;     // R reduction applied to killer moves
 

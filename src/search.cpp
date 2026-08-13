@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -59,6 +60,42 @@ constexpr std::uint64_t POLL_INTERVAL = 2048;
 // as file-scope `constexpr`s are now fields of Search::Tunables (search.hpp).
 // ---------------------------------------------------------------------------
 Search::Tunables g_tunables;
+
+// Precomputed LMR reduction table: R = base + log(d)*log(m)/divisor.
+// Indexed by remaining depth d and 1-based move count m (cap 64).
+constexpr int LMR_MOVE_CAP = 64;
+int           g_lmrTable[MAX_PLY][LMR_MOVE_CAP];
+
+void rebuild_lmr_table(int lmrBase, int lmrDivisor) {
+    const double base = static_cast<double>(lmrBase) / 100.0;
+    const double div  = std::max(static_cast<double>(lmrDivisor) / 100.0, 0.01);
+
+    for (int d = 0; d < MAX_PLY; ++d) {
+        for (int m = 0; m < LMR_MOVE_CAP; ++m)
+            g_lmrTable[d][m] = 0;
+    }
+
+    for (int d = 1; d < MAX_PLY; ++d) {
+        const double logD = std::log(static_cast<double>(d));
+        for (int m = 1; m <= LMR_MOVE_CAP; ++m) {
+            const double r = base + logD * std::log(static_cast<double>(m)) / div;
+            g_lmrTable[d][m - 1] = static_cast<int>(r);
+        }
+    }
+}
+
+int lmr_table_lookup(int depth, int moveIndex) {
+    if (depth <= 0)
+        return 0;
+    const int d  = std::min(depth, MAX_PLY - 1);
+    const int mc = std::min(moveIndex + 1, LMR_MOVE_CAP);   // 0-based i -> 1-based m
+    return g_lmrTable[d][mc - 1];
+}
+
+struct LmrTableBoot {
+    LmrTableBoot() { rebuild_lmr_table(g_tunables.lmrBase, g_tunables.lmrDivisor); }
+};
+const LmrTableBoot g_lmrBoot;
 
 using Clock = std::chrono::steady_clock;
 
@@ -508,9 +545,7 @@ private:
                     && !isTtMove
                     && !inCheck
                     && !givesCheck) {
-                    R = t_.lmrBaseReduction;
-                    if (depth >= t_.lmrDepth6At) R += t_.lmrDepth6Extra;
-                    if (i >= t_.lmrDeepAt)       R += t_.lmrDeepExtra;
+                    R = lmr_table_lookup(depth, i);
                     if (pvNode)                  R = std::max(R - t_.lmrPvReduction, 0);
                     if (isKiller)                R = std::max(R - t_.lmrKillerReduction, 0);
                     // Clamp on the REDUCED depth only; the sole activation
@@ -705,4 +740,5 @@ const Search::Tunables& Search::active_tunables() {
 
 void Search::set_tunables(const Tunables& t) {
     g_tunables = t;
+    rebuild_lmr_table(g_tunables.lmrBase, g_tunables.lmrDivisor);
 }
