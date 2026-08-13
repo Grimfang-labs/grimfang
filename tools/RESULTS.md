@@ -12,3 +12,4 @@ fixed-length 10,000-game measurement of the same change gave +17.04 (~3x).
 | date | tag | kind | change | Elo | games | verdict |
 |---|---|---|---|---|---|---|
 | 2026-08-12 | v08_lmrmin2 | SPRT | dev:[LmrMinDepth=2] vs base:[defaults] | -0.00 +/- 0.00 | 6000 | no verdict (rounds exhausted) |
+| 2026-08-12 | v08b_lmrmin2 | SPRT | dev:[LmrMinDepth=2] vs base:[LmrMinDepth=3] | -0.00 +/- 0.00 | 6000 | no verdict (rounds exhausted) |
