@@ -48,3 +48,6 @@ tools/spsa/
 /workspace/
 tools/pgn/
 tools/logs/
+
+# machine-specific fastchess engine roster
+config.json
