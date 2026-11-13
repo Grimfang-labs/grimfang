@@ -680,7 +680,9 @@ private:
             && !prevWasNull
             && pos.has_non_pawn_material(pos.side_to_move())
             && staticEval >= beta) {
-            const int R = t_.nmpBase + depth / t_.nmpDepthDiv;
+            // Reduce more the further the static eval is above beta.
+            const int R = t_.nmpBase + depth / t_.nmpDepthDiv
+                        + std::min((staticEval - beta) / t_.nmpEvalDiv, t_.nmpEvalMax);
             ss->move     = MOVE_NONE;
             ss->moved    = NO_PIECE;
             ss->contHist = &td_.contHist.sentinel();

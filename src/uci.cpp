@@ -55,9 +55,12 @@ const SpinOption kSpinOptions[] = {
     // Aspiration windows (hand-picked workaround values, never tuned).
     { "AspirationDelta",     &Search::Tunables::aspirationDelta,     20,   400  },
     { "AspirationWidenPct",  &Search::Tunables::aspirationWidenPct,  101,  300  },
-    // Null-move pruning: R = NmpBase + depth / NmpDepthDiv.
+    // Null-move pruning: R = NmpBase + depth / NmpDepthDiv
+    //                      + min((eval - beta) / NmpEvalDiv, NmpEvalMax).
     { "NmpBase",             &Search::Tunables::nmpBase,             0,    6    },
     { "NmpDepthDiv",         &Search::Tunables::nmpDepthDiv,         1,    6    },
+    { "NmpEvalDiv",          &Search::Tunables::nmpEvalDiv,          50,   800  },
+    { "NmpEvalMax",          &Search::Tunables::nmpEvalMax,          0,    6    },
     // Reverse futility pruning (static null move).
     { "RfpMaxDepth",         &Search::Tunables::rfpMaxDepth,         4,    16   },
     { "RfpMargin",           &Search::Tunables::rfpMargin,           50,   200  },

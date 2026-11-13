@@ -59,9 +59,12 @@ struct Tunables {
     int aspirationDelta     = 120;   // initial +/- window half-width (cp)
     int aspirationWidenPct  = 150;   // widen factor on fail-high/low: delta = delta * pct / 100
 
-    // Null-move pruning: R = nmpBase + depth / nmpDepthDiv.
-    int nmpBase             = 3;     // constant reduction term
+    // Null-move pruning: R = nmpBase + depth / nmpDepthDiv
+    //                      + min((staticEval - beta) / nmpEvalDiv, nmpEvalMax).
+    int nmpBase             = 2;     // constant reduction term
     int nmpDepthDiv         = 3;     // depth divisor (>= 1)
+    int nmpEvalDiv          = 200;   // + min((staticEval - beta) / nmpEvalDiv, nmpEvalMax)
+    int nmpEvalMax          = 3;
 
     // Reverse futility pruning (static null move).
     int rfpMaxDepth         = 8;     // deepest ply RFP may fire
