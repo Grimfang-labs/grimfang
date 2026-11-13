@@ -281,6 +281,7 @@ void UciLoop::run() {
         } else if (token == "ucinewgame") {
             ensure_idle();
             TT.clear();
+            Search::clear();
             pos_ = Position::startpos();
         } else if (token == "position") {
             ensure_idle();

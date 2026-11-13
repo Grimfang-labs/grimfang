@@ -6,6 +6,8 @@
 #include "killers.hpp"   // is_quiet_move (shared quiet classifier)
 #include "move.hpp"
 #include "position.hpp"
+#include "search.hpp"
+#include "tt.hpp"
 #include "types.hpp"
 #include "zobrist.hpp"
 
@@ -18,6 +20,8 @@
 //   * targeting: a simulated quiet cutoff bonuses the cutoff move and
 //     penalises ONLY the quiets tried before it (captures and later moves
 //     are left untouched).
+//   * Search::clear() restores a reproducible starting state for the
+//     persistent (cross-search) history.
 // ===========================================================================
 
 namespace {
@@ -132,4 +136,34 @@ TEST_CASE("history: cutoff bonuses the mover and penalises only earlier quiets",
     // Resulting ordering among these quiets: cutoff > untouched > penalised.
     REQUIRE(h.get(stm, cutoff) > h.get(stm, quietD));
     REQUIRE(h.get(stm, quietD) > h.get(stm, quietA));
+}
+
+TEST_CASE("history: Search::clear() resets the persistent state",
+          "[history][search]") {
+    // Node-capped searches keep history between calls (like a game). With the
+    // TT cleared, the only state left between two identical searches is the
+    // persistent history, so clear() must make them reproduce exactly (a run
+    // in between must not leak into the next cleared run).
+    TT.resize(16);
+    const char* fen =
+        "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10";
+    constexpr std::uint64_t kNodes = 20000;
+
+    auto run = [&](bool clearFirst) {
+        Position pos;
+        pos.set_fen(fen);
+        TT.clear();
+        if (clearFirst)
+            Search::clear();
+        return Search::search_nodes(pos, kNodes);
+    };
+
+    const Search::Result a = run(true);
+    run(false);   // warm the history further
+    const Search::Result b = run(true);
+    REQUIRE(a.nodes == b.nodes);
+    REQUIRE(a.bestMove == b.bestMove);
+    REQUIRE(a.score == b.score);
+
+    Search::clear();
 }

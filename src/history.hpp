@@ -13,10 +13,12 @@
 // The soft, long-range complement to killers. Killers say "this exact quiet
 // move refuted a sibling at this ply"; history says "quiet moves with this
 // (side, from, to) have tended to cause cutoffs anywhere in this search". It is
-// a per-search score table over quiet moves, rewarded on a quiet beta cutoff
-// and penalised for the quiets that were tried first and failed ("gravity").
+// a score table over quiet moves, rewarded on a quiet beta cutoff and
+// penalised for the quiets that were tried first and failed ("gravity").
 //
-// Search-local: cleared at the start of each search, never persisted.
+// Persistent: owned by the search's per-thread state (ThreadData in
+// search.cpp), kept across searches of one game and cleared by
+// Search::clear() (ucinewgame, bench, datagen game start).
 // ===========================================================================
 
 // Gravity target: repeated bonuses converge on +/-MAX_HISTORY instead of

@@ -27,7 +27,8 @@
 // everywhere. Mate scores are made node-relative on store / re-rooted on probe.
 // Quiet moves that cause a beta cutoff are remembered as killers (two per ply)
 // and ordered ahead of generic quiets; a butterfly history table (rewarded on
-// quiet cutoffs, penalised for quiets tried first) orders the remaining quiets.
+// quiet cutoffs, penalised for quiets tried first, kept across the searches of
+// one game) orders the remaining quiets.
 // Quiescence skips captures that lose material by SEE.
 //
 // PV-node classification: a node is a PV node iff it is reached by always
@@ -69,6 +70,26 @@ Search::Tunables g_tunables;
 
 using Clock = std::chrono::steady_clock;
 
+// ---------------------------------------------------------------------------
+// Persistent per-thread search state. Everything a search learns that should
+// carry over to the next search of the same game lives here: today only the
+// butterfly history, later continuation / capture / correction history. It
+// survives between `go` commands and is reset by Search::clear() (ucinewgame,
+// bench, datagen game start). Search-local scratch (killers, PV table) stays
+// in Searcher.
+//
+// There is one search thread today, so one instance. With multiple threads
+// each worker gets its own ThreadData (index = thread id) and Search::clear()
+// resets them all.
+// ---------------------------------------------------------------------------
+struct ThreadData {
+    HistoryTable history;
+
+    void clear() { history.clear(); }
+};
+
+ThreadData g_mainThreadData;
+
 std::string score_to_uci(Value score) {
     if (std::abs(score) >= VALUE_MATE_IN_MAX_PLY) {
         const int mate = (score > 0) ? (VALUE_MATE - score + 1) / 2
@@ -80,7 +101,8 @@ std::string score_to_uci(Value score) {
 
 class Searcher {
 public:
-    explicit Searcher(std::atomic<bool>& stop) : stop_(stop) {}
+    Searcher(std::atomic<bool>& stop, ThreadData& td)
+        : stop_(stop), td_(td), history_(td.history) {}
 
     Search::Result iterate(Position& pos, const Search::Limits& limits, bool printInfo) {
         nodes_     = 0;
@@ -94,11 +116,11 @@ public:
         t_ = Search::active_tunables();
 
         // One search == one generation. Entries from earlier searches stay in
-        // the table but age out under replacement. Killers and history are
-        // search-local and start empty.
+        // the table but age out under replacement. Killers are search-local
+        // and start empty; history persists in ThreadData across searches
+        // (reset by Search::clear()).
         TT.new_search();
         killers_.clear();
-        history_.clear();
 
         // Time budget (no-op when only depth/nodes/infinite were given).
         const TimeBudget tb = compute_budget(limits, pos.side_to_move());
@@ -230,8 +252,9 @@ private:
     Move pvTable_[MAX_PLY][MAX_PLY];
     int  pvLength_[MAX_PLY] = { 0 };
 
-    KillerTable  killers_;
-    HistoryTable history_;
+    ThreadData&   td_;        // persistent state (history tables)
+    KillerTable   killers_;   // search-local
+    HistoryTable& history_;   // == td_.history
 
     std::int64_t elapsed_ms() const {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -670,9 +693,13 @@ private:
 
 } // namespace
 
+void Search::clear() {
+    g_mainThreadData.clear();
+}
+
 Search::Result Search::search(Position& pos, const Search::Limits& limits,
                               std::atomic<bool>& stop) {
-    Searcher s(stop);
+    Searcher s(stop, g_mainThreadData);
     const Search::Result r = s.iterate(pos, limits, /*printInfo=*/true);
     // Exactly one bestmove per `go`: iterate always yields a legal fallback
     // move (or MOVE_NONE -> "0000" for a terminal position). Line-atomic emit.
@@ -680,8 +707,14 @@ Search::Result Search::search(Position& pos, const Search::Limits& limits,
     return r;
 }
 
+// Test helpers. search_fixed starts every call from cleared history so a
+// test's result does not depend on which searches ran before it (the TT is
+// the caller's to clear). search_nodes deliberately keeps history, like a
+// real game search: datagen calls it once per move and resets the state
+// with Search::clear() at the start of each game.
 Search::Result Search::search_fixed(Position& pos, int depth, std::atomic<bool>& stop) {
-    Searcher s(stop);
+    Search::clear();
+    Searcher s(stop, g_mainThreadData);
     Search::Limits limits;
     limits.depth = depth;
     return s.iterate(pos, limits, /*printInfo=*/false);
@@ -694,7 +727,8 @@ Search::Result Search::search_fixed(Position& pos, int depth) {
 
 Search::Result Search::search_fixed(Position& pos, int depth, bool useAspiration) {
     std::atomic<bool> never{ false };
-    Searcher s(never);
+    Search::clear();
+    Searcher s(never, g_mainThreadData);
     Search::Limits limits;
     limits.depth      = depth;
     limits.aspiration = useAspiration;
@@ -703,7 +737,7 @@ Search::Result Search::search_fixed(Position& pos, int depth, bool useAspiration
 
 Search::Result Search::search_nodes(Position& pos, std::uint64_t nodeLimit,
                                     std::atomic<bool>& stop) {
-    Searcher s(stop);
+    Searcher s(stop, g_mainThreadData);
     Search::Limits limits;
     limits.nodes = nodeLimit;
     return s.iterate(pos, limits, /*printInfo=*/false);
@@ -743,8 +777,9 @@ std::uint64_t Search::bench(int depth) {
     std::atomic<bool> never{ false };
     std::uint64_t     totalNodes = 0;
 
-    // Reproducible signature: a fixed-size table, cleared before each position
-    // so the node count is independent of any prior `setoption Hash` state.
+    // Reproducible signature: a fixed-size table, cleared (together with the
+    // persistent history) before each position so the node count is
+    // independent of any prior `setoption Hash` state or earlier searches.
     TT.resize(16);
 
     const auto start = Clock::now();
@@ -754,8 +789,9 @@ std::uint64_t Search::bench(int depth) {
         pos.set_fen(fen);
 
         TT.clear();
+        Search::clear();
 
-        Searcher s(never);
+        Searcher s(never, g_mainThreadData);
         Limits   limits;
         limits.depth = depth;
         const Result r = s.iterate(pos, limits, /*printInfo=*/false);

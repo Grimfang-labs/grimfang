@@ -214,6 +214,9 @@ bool play_one_game(Position& pos, Rng64& rng, const DatagenOptions& opts,
                    std::uint64_t& positions) {
     pos = Position::startpos();
     buffer.clear();
+    // Persistent search state (history) starts fresh every game so each game
+    // depends only on the seed, not on earlier games.
+    Search::clear();
 
     if (!play_random_opening(pos, rng, opts.randomPlies))
         return false;
