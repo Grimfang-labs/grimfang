@@ -81,6 +81,37 @@ TEST_CASE("tt: store then probe returns move/bound/depth", "[tt]") {
     REQUIRE(value_from_tt(e->value(), 4) == 123);
 }
 
+TEST_CASE("tt: static eval round-trips and survives eval-less stores", "[tt]") {
+    TT.resize(1);
+    TT.clear();
+    TT.new_search();
+
+    const Key key = 0x00FEDCBA98765432ULL;
+    TTEntry*  e   = nullptr;
+
+    // VALUE_NONE must survive the int16 storage unchanged.
+    TT.store(key, MOVE_NONE, 10, VALUE_NONE, 2, BOUND_UPPER, 0);
+    REQUIRE(TT.probe(key, e));
+    REQUIRE(e->eval() == VALUE_NONE);
+
+    TT.store(key, MOVE_NONE, 10, -1234, 3, BOUND_LOWER, 0);
+    REQUIRE(TT.probe(key, e));
+    REQUIRE(e->eval() == -1234);
+
+    // A later store for the same position without an eval keeps the cached one.
+    TT.store(key, MOVE_NONE, 20, VALUE_NONE, 5, BOUND_EXACT, 0);
+    REQUIRE(TT.probe(key, e));
+    REQUIRE(e->depth() == 5);
+    REQUIRE(e->eval() == -1234);
+
+    // A much shallower non-exact store is refused; the entry (eval included)
+    // is left untouched.
+    TT.store(key, MOVE_NONE, 30, 777, 0, BOUND_LOWER, 0);
+    REQUIRE(TT.probe(key, e));
+    REQUIRE(e->depth() == 5);
+    REQUIRE(e->eval() == -1234);
+}
+
 TEST_CASE("tt: key32 verification rejects same-index collisions", "[tt]") {
     TT.resize(1);
     TT.clear();

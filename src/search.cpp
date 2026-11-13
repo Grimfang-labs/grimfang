@@ -12,6 +12,7 @@
 #include "killers.hpp"
 #include "movegen.hpp"
 #include "position.hpp"
+#include "see.hpp"
 #include "sync.hpp"
 #include "timeman.hpp"
 #include "tt.hpp"
@@ -19,14 +20,16 @@
 // ===========================================================================
 // search.cpp - negamax alpha-beta + quiescence + iterative deepening.
 //
-// Move ordering (Stage 3): the transposition-table move first, then captures
-// by MVV-LVA, then quiet moves in generation order. A shared transposition
+// Move ordering: the transposition-table move first, then captures that do
+// not lose material (static exchange evaluation >= 0) by MVV-LVA, then quiet
+// moves, then losing captures (SEE < 0). A shared transposition
 // table provides depth-preferred cutoffs at non-PV nodes and a best-move hint
 // everywhere. Mate scores are made node-relative on store / re-rooted on probe.
 // Quiet moves that cause a beta cutoff are remembered as killers (two per ply)
 // and ordered ahead of generic quiets; a butterfly history table (rewarded on
-// quiet cutoffs, penalised for quiets tried first) orders the remaining quiets.
-// No SEE yet.
+// quiet cutoffs, penalised for quiets tried first, kept across the searches of
+// one game) orders the remaining quiets.
+// Quiescence skips captures that lose material by SEE.
 //
 // PV-node classification: a node is a PV node iff it is reached by always
 // following the first (best) move from the root. TT cutoffs are taken only at
@@ -39,12 +42,17 @@
 
 namespace {
 
-// Static piece values used purely for MVV-LVA move ordering.
-constexpr int orderValue[PIECE_TYPE_NB] = { 100, 320, 330, 500, 900, 20000 };
+// Static piece values used for MVV-LVA move ordering (shared with SEE).
+constexpr const int (&orderValue)[PIECE_TYPE_NB] = SEE::VALUE;
 
-constexpr int CAPTURE_BONUS   = 1'000'000;
-constexpr int PROMOTION_BONUS =   900'000;
-constexpr int TT_MOVE_BONUS   = 10'000'000;   // root previous-best move
+constexpr int CAPTURE_BONUS     =  1'000'000;
+constexpr int PROMOTION_BONUS   =    900'000;
+constexpr int TT_MOVE_BONUS     = 10'000'000;   // root previous-best move
+// Losing captures (SEE < 0) are ordered after every quiet move: this base plus
+// any MVV-LVA term stays far below the lowest history score (-MAX_HISTORY).
+constexpr int BAD_CAPTURE_BONUS = -1'000'000;
+static_assert(BAD_CAPTURE_BONUS + 16 * 20000 < -MAX_HISTORY,
+              "bad captures must order below every quiet move");
 
 // Poll the stop conditions roughly every this many nodes.
 constexpr std::uint64_t POLL_INTERVAL = 2048;
@@ -62,6 +70,26 @@ Search::Tunables g_tunables;
 
 using Clock = std::chrono::steady_clock;
 
+// ---------------------------------------------------------------------------
+// Persistent per-thread search state. Everything a search learns that should
+// carry over to the next search of the same game lives here: today only the
+// butterfly history, later continuation / capture / correction history. It
+// survives between `go` commands and is reset by Search::clear() (ucinewgame,
+// bench, datagen game start). Search-local scratch (killers, PV table) stays
+// in Searcher.
+//
+// There is one search thread today, so one instance. With multiple threads
+// each worker gets its own ThreadData (index = thread id) and Search::clear()
+// resets them all.
+// ---------------------------------------------------------------------------
+struct ThreadData {
+    HistoryTable history;
+
+    void clear() { history.clear(); }
+};
+
+ThreadData g_mainThreadData;
+
 std::string score_to_uci(Value score) {
     if (std::abs(score) >= VALUE_MATE_IN_MAX_PLY) {
         const int mate = (score > 0) ? (VALUE_MATE - score + 1) / 2
@@ -73,7 +101,8 @@ std::string score_to_uci(Value score) {
 
 class Searcher {
 public:
-    explicit Searcher(std::atomic<bool>& stop) : stop_(stop) {}
+    Searcher(std::atomic<bool>& stop, ThreadData& td)
+        : stop_(stop), td_(td), history_(td.history) {}
 
     Search::Result iterate(Position& pos, const Search::Limits& limits, bool printInfo) {
         nodes_     = 0;
@@ -87,11 +116,11 @@ public:
         t_ = Search::active_tunables();
 
         // One search == one generation. Entries from earlier searches stay in
-        // the table but age out under replacement. Killers and history are
-        // search-local and start empty.
+        // the table but age out under replacement. Killers are search-local
+        // and start empty; history persists in ThreadData across searches
+        // (reset by Search::clear()).
         TT.new_search();
         killers_.clear();
-        history_.clear();
 
         // Time budget (no-op when only depth/nodes/infinite were given).
         const TimeBudget tb = compute_budget(limits, pos.side_to_move());
@@ -223,8 +252,9 @@ private:
     Move pvTable_[MAX_PLY][MAX_PLY];
     int  pvLength_[MAX_PLY] = { 0 };
 
-    KillerTable  killers_;
-    HistoryTable history_;
+    ThreadData&   td_;        // persistent state (history tables)
+    KillerTable   killers_;   // search-local
+    HistoryTable& history_;   // == td_.history
 
     std::int64_t elapsed_ms() const {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -254,34 +284,40 @@ private:
         const bool     isEp = (mt == EN_PASSANT);
         const bool     isCapture = isEp || (pos.piece_on(to) != NO_PIECE);
 
-        int score = 0;
-        if (isCapture) {
-            const PieceType victim   = isEp ? PAWN : type_of(pos.piece_on(to));
-            const PieceType attacker = type_of(pos.piece_on(m.from_sq()));
-            score = CAPTURE_BONUS + orderValue[victim] * 16 - orderValue[attacker];
-        }
-        if (mt == PROMOTION)
-            score += PROMOTION_BONUS + orderValue[m.promotion_type()];
-
-        // Quiet move (no capture/promotion signal): killers first, then order
-        // the rest by history. History values (|.| < MAX_HISTORY) sit far below
-        // the killer band, so the total order stays TT > captures > K1 > K2 >
-        // history-sorted quiets.
-        if (score == 0) {
+        // Quiet move (no capture/promotion): killers first, then order the
+        // rest by history. History values (|.| < MAX_HISTORY) sit far below
+        // the killer band and far above the bad-capture band, so the total
+        // order is TT > good captures/promotions > K1 > K2 > history-sorted
+        // quiets > losing captures.
+        if (!isCapture && mt != PROMOTION) {
             const int kb = killer_bonus(m, k1, k2);
             if (kb)
                 return kb;
             return history_.get(pos.side_to_move(), m);
         }
 
+        int score = 0;
+        if (isCapture) {
+            const PieceType victim   = isEp ? PAWN : type_of(pos.piece_on(to));
+            const PieceType attacker = type_of(pos.piece_on(m.from_sq()));
+            // SEE can only come out negative when the attacker is worth more
+            // than the victim; otherwise skip the exchange evaluation.
+            const bool good = orderValue[victim] >= orderValue[attacker]
+                           || see_ge(pos, m, 0);
+            score = (good ? CAPTURE_BONUS : BAD_CAPTURE_BONUS)
+                  + orderValue[victim] * 16 - orderValue[attacker];
+        }
+        if (mt == PROMOTION)
+            score += PROMOTION_BONUS + orderValue[m.promotion_type()];
+
         return score;
     }
 
     // Stable insertion sort, descending by score (ties keep generation order).
     // k1/k2 are this ply's killers (MOVE_NONE to disable, e.g. in quiescence).
+    // On return scores[i] is the ordering score of list.moves[i].
     void order_moves(const Position& pos, MoveList& list, Move ttMove,
-                     Move k1, Move k2) const {
-        int scores[MoveList::CAPACITY];
+                     Move k1, Move k2, int* scores) const {
         for (int i = 0; i < list.count; ++i)
             scores[i] = score_move(pos, list.moves[i], ttMove, k1, k2);
 
@@ -321,66 +357,127 @@ private:
         sync_cout(oss.str());
     }
 
-    // ---- Quiescence ----------------------------------------------------
-    // Stand-pat is illegal while in check: search every legal evasion instead.
-    // bestScore starts at -VALUE_MATE + ply so a checkmated node (zero evasions)
-    // returns a mate score. Non-check path below is unchanged (fail-hard,
-    // captures-only, no TT / delta pruning).
-    Value quiescence(Position& pos, Value alpha, Value beta, int ply) {
+    // ---- Quiescence (fail-soft) -----------------------------------------
+    // Captures/promotions only, from a stand-pat bound; every legal evasion
+    // when in check (no stand-pat: bestScore starts at -VALUE_MATE + ply so a
+    // checkmated node with zero evasions returns a mate score).
+    //
+    // The TT is probed (cutoffs at non-PV nodes with any stored depth, the TT
+    // move ordered first) and written at exit with depth 0. The cached static
+    // eval is reused on a hit, and a bound-compatible TT score tightens the
+    // stand-pat. Losing captures (SEE < 0) and captures that cannot lift the
+    // stand-pat to alpha even with a margin (delta pruning) are skipped.
+    Value quiescence(Position& pos, Value alpha, Value beta, int ply, bool pvNode) {
         ++nodes_;
         if (ply > seldepth_) seldepth_ = ply;
         if (should_stop())   return alpha;
         if (ply >= MAX_PLY - 1)
             return Eval::evaluate(pos);
 
-        if (pos.checkers() != 0) {
-            Value bestScore = static_cast<Value>(-VALUE_MATE + ply);
-            MoveList evasions;
-            generate_legal(pos, evasions);
-            order_moves(pos, evasions, MOVE_NONE, MOVE_NONE, MOVE_NONE);
+        const Key  key     = pos.key();
+        const bool inCheck = pos.checkers() != 0;
 
-            for (int i = 0; i < evasions.count; ++i) {
-                const Move m = evasions.moves[i];
-                pos.make_move(m);
-                const Value score = -quiescence(pos, -beta, -alpha, ply + 1);
-                pos.unmake_move(m);
+        // ---- Transposition-table probe ---------------------------------
+        // Copy what we need out of the entry now: deeper recursion can
+        // overwrite the slot the pointer refers to.
+        TTEntry*   tte     = nullptr;
+        const bool ttHit   = TT.probe(key, tte);
+        const Move  ttMove  = ttHit ? tte->move() : MOVE_NONE;
+        const Value ttValue = ttHit ? value_from_tt(tte->value(), ply) : VALUE_NONE;
+        const Value ttEval  = ttHit ? tte->eval() : VALUE_NONE;
+        const Bound ttBound = ttHit ? tte->bound() : BOUND_NONE;
 
-                if (aborted_)
-                    return alpha;
-                if (score > bestScore)
-                    bestScore = score;
-                if (score >= beta)
-                    return beta;
-                if (score > alpha)
-                    alpha = score;
+        if (ttHit && !pvNode
+            && (ttBound == BOUND_EXACT
+                || (ttBound == BOUND_LOWER && ttValue >= beta)
+                || (ttBound == BOUND_UPPER && ttValue <= alpha)))
+            return ttValue;
+
+        const Value alphaOrig = alpha;
+        Value bestScore;
+        Value staticEval = VALUE_NONE;
+        Value standPat   = VALUE_NONE;
+
+        if (inCheck) {
+            bestScore = static_cast<Value>(-VALUE_MATE + ply);
+        } else {
+            staticEval = (ttEval != VALUE_NONE) ? ttEval : Eval::evaluate(pos);
+            standPat   = staticEval;
+
+            // A TT score is a better estimate than the static eval when its
+            // bound points the right way (never trust a mate score here).
+            if (ttHit
+                && std::abs(ttValue) < VALUE_MATE_IN_MAX_PLY
+                && (ttBound & (ttValue > standPat ? BOUND_LOWER : BOUND_UPPER)))
+                standPat = ttValue;
+
+            bestScore = standPat;
+            if (bestScore >= beta) {
+                if (!ttHit)
+                    TT.store(key, MOVE_NONE, bestScore, staticEval, 0, BOUND_LOWER, ply);
+                return bestScore;
             }
-            return bestScore;
+            if (bestScore > alpha)
+                alpha = bestScore;
         }
 
-        const Value standPat = Eval::evaluate(pos);
-        if (standPat >= beta)
-            return beta;
-        if (standPat > alpha)
-            alpha = standPat;
+        MoveList list;
+        if (inCheck)
+            generate_legal(pos, list);
+        else
+            generate_captures(pos, list);
+        int scores[MoveList::CAPACITY];
+        order_moves(pos, list, ttMove, MOVE_NONE, MOVE_NONE, scores);
 
-        MoveList caps;
-        generate_captures(pos, caps);
-        order_moves(pos, caps, MOVE_NONE, MOVE_NONE, MOVE_NONE);
+        Move bestMove = MOVE_NONE;
 
-        for (int i = 0; i < caps.count; ++i) {
-            const Move m = caps.moves[i];
+        for (int i = 0; i < list.count; ++i) {
+            const Move m = list.moves[i];
+
+            if (!inCheck) {
+                // Losing captures (SEE < 0) carry a negative ordering score
+                // and are sorted last: stop at the first one.
+                if (scores[i] < 0)
+                    break;
+
+                // Delta pruning: even winning the victim outright plus a
+                // margin cannot reach alpha. Promotions are never pruned.
+                if (m.type_of() != PROMOTION) {
+                    const PieceType victim = (m.type_of() == EN_PASSANT)
+                                                 ? PAWN
+                                                 : type_of(pos.piece_on(m.to_sq()));
+                    const Value futility = standPat + orderValue[victim] + t_.qsDeltaMargin;
+                    if (futility <= alpha) {
+                        bestScore = std::max(bestScore, futility);
+                        continue;
+                    }
+                }
+            }
+
             pos.make_move(m);
-            const Value score = -quiescence(pos, -beta, -alpha, ply + 1);
+            const Value score = -quiescence(pos, -beta, -alpha, ply + 1, pvNode);
             pos.unmake_move(m);
 
             if (aborted_)
                 return alpha;
-            if (score >= beta)
-                return beta;
-            if (score > alpha)
-                alpha = score;
+
+            if (score > bestScore) {
+                bestScore = score;
+                if (score > alpha) {
+                    bestMove = m;
+                    if (score >= beta)
+                        break;
+                    alpha = score;
+                }
+            }
         }
-        return alpha;
+
+        const Bound bound = (bestScore >= beta)     ? BOUND_LOWER
+                          : (bestScore > alphaOrig) ? BOUND_EXACT
+                                                    : BOUND_UPPER;
+        TT.store(key, bestMove, bestScore, staticEval, 0, bound, ply);
+
+        return bestScore;
     }
 
     // ---- Negamax alpha-beta (fail-soft) --------------------------------
@@ -397,32 +494,37 @@ private:
             return VALUE_DRAW;
 
         if (depth <= 0)
-            return quiescence(pos, alpha, beta, ply);
+            return quiescence(pos, alpha, beta, ply, pvNode);
 
         const Key   key        = pos.key();
         const Value alphaOrig  = alpha;
         const bool  inCheck    = pos.checkers() != 0;
 
         // ---- Transposition-table probe ---------------------------------
-        TTEntry*   tte    = nullptr;
-        const bool ttHit  = TT.probe(key, tte);
-        const Move ttMove = ttHit ? tte->move() : MOVE_NONE;
+        // Copy every field we need right away: the entry pointer can be
+        // overwritten by stores made during deeper recursion.
+        TTEntry*   tte     = nullptr;
+        const bool ttHit   = TT.probe(key, tte);
+        const Move  ttMove  = ttHit ? tte->move() : MOVE_NONE;
+        const Value ttValue = ttHit ? value_from_tt(tte->value(), ply) : VALUE_NONE;
+        const Value ttEval  = ttHit ? tte->eval() : VALUE_NONE;
+        const int   ttDepth = ttHit ? tte->depth() : -1;
+        const Bound ttBound = ttHit ? tte->bound() : BOUND_NONE;
 
         // A sufficiently deep entry can cut, but only at a non-PV, non-root
         // node so the principal variation is always searched in full.
-        if (ttHit && !pvNode && ply > 0 && tte->depth() >= depth) {
-            const Value ttValue = value_from_tt(tte->value(), ply);
-            const Bound b       = tte->bound();
-            if (b == BOUND_EXACT
-                || (b == BOUND_LOWER && ttValue >= beta)
-                || (b == BOUND_UPPER && ttValue <= alpha))
+        if (ttHit && !pvNode && ply > 0 && ttDepth >= depth) {
+            if (ttBound == BOUND_EXACT
+                || (ttBound == BOUND_LOWER && ttValue >= beta)
+                || (ttBound == BOUND_UPPER && ttValue <= alpha))
                 return ttValue;
         }
 
-        // Static eval of this node (side-relative). Computed once for non-check
-        // nodes; used by null-move pruning now and by RFP next rung. Meaningless
-        // when in check, so left as VALUE_NONE there.
-        const Value staticEval = inCheck ? VALUE_NONE : Eval::evaluate(pos);
+        // Static eval of this node (side-relative), reused from the TT when
+        // cached. Meaningless when in check, so left as VALUE_NONE there.
+        const Value staticEval = inCheck            ? VALUE_NONE
+                               : ttEval != VALUE_NONE ? ttEval
+                                                      : Eval::evaluate(pos);
 
         // ---- Reverse futility pruning (static null move) ---------------
         // Cheapest pruner: no search at all. If the static eval is so far above
@@ -471,7 +573,9 @@ private:
             return inCheck ? static_cast<Value>(-(VALUE_MATE - ply))
                            : VALUE_DRAW;
 
-        order_moves(pos, list, ttMove, killers_.primary(ply), killers_.secondary(ply));
+        int scores[MoveList::CAPACITY];
+        order_moves(pos, list, ttMove, killers_.primary(ply), killers_.secondary(ply),
+                    scores);
 
         Value bestScore = -VALUE_INFINITE;
         Move  bestMove  = MOVE_NONE;
@@ -581,8 +685,7 @@ private:
         const Bound bound = (bestScore >= beta)     ? BOUND_LOWER
                           : (bestScore > alphaOrig) ? BOUND_EXACT
                                                     : BOUND_UPPER;
-        // Static eval is not cached at internal nodes yet (RFP/NMP rung).
-        TT.store(key, bestMove, bestScore, VALUE_NONE, depth, bound, ply);
+        TT.store(key, bestMove, bestScore, staticEval, depth, bound, ply);
 
         return bestScore;
     }
@@ -590,9 +693,13 @@ private:
 
 } // namespace
 
+void Search::clear() {
+    g_mainThreadData.clear();
+}
+
 Search::Result Search::search(Position& pos, const Search::Limits& limits,
                               std::atomic<bool>& stop) {
-    Searcher s(stop);
+    Searcher s(stop, g_mainThreadData);
     const Search::Result r = s.iterate(pos, limits, /*printInfo=*/true);
     // Exactly one bestmove per `go`: iterate always yields a legal fallback
     // move (or MOVE_NONE -> "0000" for a terminal position). Line-atomic emit.
@@ -600,8 +707,14 @@ Search::Result Search::search(Position& pos, const Search::Limits& limits,
     return r;
 }
 
+// Test helpers. search_fixed starts every call from cleared history so a
+// test's result does not depend on which searches ran before it (the TT is
+// the caller's to clear). search_nodes deliberately keeps history, like a
+// real game search: datagen calls it once per move and resets the state
+// with Search::clear() at the start of each game.
 Search::Result Search::search_fixed(Position& pos, int depth, std::atomic<bool>& stop) {
-    Searcher s(stop);
+    Search::clear();
+    Searcher s(stop, g_mainThreadData);
     Search::Limits limits;
     limits.depth = depth;
     return s.iterate(pos, limits, /*printInfo=*/false);
@@ -614,7 +727,8 @@ Search::Result Search::search_fixed(Position& pos, int depth) {
 
 Search::Result Search::search_fixed(Position& pos, int depth, bool useAspiration) {
     std::atomic<bool> never{ false };
-    Searcher s(never);
+    Search::clear();
+    Searcher s(never, g_mainThreadData);
     Search::Limits limits;
     limits.depth      = depth;
     limits.aspiration = useAspiration;
@@ -623,7 +737,7 @@ Search::Result Search::search_fixed(Position& pos, int depth, bool useAspiration
 
 Search::Result Search::search_nodes(Position& pos, std::uint64_t nodeLimit,
                                     std::atomic<bool>& stop) {
-    Searcher s(stop);
+    Searcher s(stop, g_mainThreadData);
     Search::Limits limits;
     limits.nodes = nodeLimit;
     return s.iterate(pos, limits, /*printInfo=*/false);
@@ -663,8 +777,9 @@ std::uint64_t Search::bench(int depth) {
     std::atomic<bool> never{ false };
     std::uint64_t     totalNodes = 0;
 
-    // Reproducible signature: a fixed-size table, cleared before each position
-    // so the node count is independent of any prior `setoption Hash` state.
+    // Reproducible signature: a fixed-size table, cleared (together with the
+    // persistent history) before each position so the node count is
+    // independent of any prior `setoption Hash` state or earlier searches.
     TT.resize(16);
 
     const auto start = Clock::now();
@@ -674,8 +789,9 @@ std::uint64_t Search::bench(int depth) {
         pos.set_fen(fen);
 
         TT.clear();
+        Search::clear();
 
-        Searcher s(never);
+        Searcher s(never, g_mainThreadData);
         Limits   limits;
         limits.depth = depth;
         const Result r = s.iterate(pos, limits, /*printInfo=*/false);

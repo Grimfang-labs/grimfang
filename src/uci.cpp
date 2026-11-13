@@ -71,6 +71,8 @@ const SpinOption kSpinOptions[] = {
     { "LmrDeepAt",           &Search::Tunables::lmrDeepAt,           6,    24   },
     { "LmrPvReduction",      &Search::Tunables::lmrPvReduction,      0,    4    },
     { "LmrKillerReduction",  &Search::Tunables::lmrKillerReduction,  0,    4    },
+    // Quiescence delta pruning margin (cp).
+    { "QsDeltaMargin",       &Search::Tunables::qsDeltaMargin,       50,   600  },
     // History: bonus = min(depth*depth * HistoryBonusMultPct/100, HistoryBonusCap).
     { "HistoryBonusMultPct", &Search::Tunables::historyBonusMultPct, 50,   200  },
     { "HistoryBonusCap",     &Search::Tunables::historyBonusCap,     800,  3200 },
@@ -279,6 +281,7 @@ void UciLoop::run() {
         } else if (token == "ucinewgame") {
             ensure_idle();
             TT.clear();
+            Search::clear();
             pos_ = Position::startpos();
         } else if (token == "position") {
             ensure_idle();

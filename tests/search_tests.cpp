@@ -30,6 +30,10 @@ struct CoreInit {
         BB::init();
         Zobrist::init();
         Attacks::init();
+        // Search with a real table, as the engine does (the UCI loop sizes
+        // it to 16 MB at startup). Without this, these tests ran TT-less
+        // whenever no earlier test had happened to resize the global table.
+        TT.resize(16);
     }
 };
 const CoreInit g_coreInit;

@@ -48,6 +48,7 @@ endif()
 # ---------------------------------------------------------------------------
 option(USE_PEXT       "Use BMI2 PEXT instruction for magic indexing" OFF)
 option(GRIMFANG_TESTS "Build the test suite"                        ON)
+option(GRIMFANG_LTO   "Link-time optimization (IPO) for Release builds" ON)
 
 # ---------------------------------------------------------------------------
 # Warning / optimization flags (per-compiler, zero-warning goal)
@@ -91,6 +92,7 @@ add_library(grimfang_core STATIC
   src/eval.cpp
   src/nnue.cpp
   src/tt.cpp
+  src/see.cpp
   src/search.cpp
   src/timeman.cpp
   src/uci.cpp
@@ -108,6 +110,24 @@ target_compile_definitions(grimfang_core PRIVATE $<$<CONFIG:Debug>:NNUE_INCREMEN
 # ---------------------------------------------------------------------------
 add_executable(grimfang src/main.cpp)
 target_link_libraries(grimfang PRIVATE grimfang_core)
+
+# ---------------------------------------------------------------------------
+# Link-time optimization (Release only, when the toolchain supports it). Kept
+# to the engine targets so third-party test deps (Catch2) build as before.
+# LTO changes code generation only, never search behaviour: the bench
+# signature must be identical with GRIMFANG_LTO=ON and OFF.
+# ---------------------------------------------------------------------------
+if(GRIMFANG_LTO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT GRIMFANG_IPO_SUPPORTED OUTPUT GRIMFANG_IPO_ERROR LANGUAGES CXX)
+  if(GRIMFANG_IPO_SUPPORTED)
+    message(STATUS "Grimfang: LTO enabled for Release builds")
+    set_property(TARGET grimfang_core grimfang
+                 PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+  else()
+    message(STATUS "Grimfang: LTO not supported, building without it: ${GRIMFANG_IPO_ERROR}")
+  endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests

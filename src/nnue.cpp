@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -83,35 +84,56 @@ const nnue::Network& network() {
     return *net;
 }
 
-// --- Accumulator +/- weight vector -----------------------------------------
-// Both paths compute target[i] = wrap_i16(target[i] +/- weights[i]) over the
-// full kHiddenSize lanes. AVX2 add/sub of i16 wraps in two's complement exactly
-// like the scalar static_cast<int16_t>, so the two are bit-identical.
+// --- Accumulator kernels ---------------------------------------------------
+// All paths compute in wrapping i16 arithmetic. AVX2 add/sub of i16 wraps in
+// two's complement exactly like the scalar static_cast<int16_t> (modular since
+// C++20), and addition mod 2^16 is associative/commutative, so the scalar and
+// SIMD paths, and incremental vs full refresh, are bit-identical whatever the
+// order the weight rows are applied in.
+//
+// Every pointer is 64-byte aligned: Accumulator is alignas(64) and the
+// embedded Network is validated as 64-byte aligned at load, so the AVX2 paths
+// use aligned loads/stores.
 
 void add_weights_scalar(std::int16_t* target, const std::int16_t* weights) {
     for (int i = 0; i < nnue::kHiddenSize; ++i)
         target[i] = static_cast<std::int16_t>(target[i] + weights[i]);
 }
 
-void sub_weights_scalar(std::int16_t* target, const std::int16_t* weights) {
-    for (int i = 0; i < nnue::kHiddenSize; ++i)
-        target[i] = static_cast<std::int16_t>(target[i] - weights[i]);
-}
-
-#if defined(__AVX2__)
-void add_weights_simd(std::int16_t* target, const std::int16_t* weights) {
-    for (int i = 0; i < nnue::kHiddenSize; i += 16) {
-        __m256i t = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(target + i));
-        __m256i w = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(weights + i));
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(target + i), _mm256_add_epi16(t, w));
+// dst = src + sum(adds) - sum(subs), one pass.
+template <int Adds, int Subs>
+void fused_update_scalar(std::int16_t* dst, const std::int16_t* src,
+                         const std::int16_t* const* adds, const std::int16_t* const* subs) {
+    for (int i = 0; i < nnue::kHiddenSize; ++i) {
+        int v = src[i];
+        for (int a = 0; a < Adds; ++a) v += adds[a][i];
+        for (int s = 0; s < Subs; ++s) v -= subs[s][i];
+        dst[i] = static_cast<std::int16_t>(v);
     }
 }
 
-void sub_weights_simd(std::int16_t* target, const std::int16_t* weights) {
+#if defined(__AVX2__)
+inline __m256i load256(const std::int16_t* p) {
+    return _mm256_load_si256(reinterpret_cast<const __m256i*>(p));
+}
+
+inline void store256(std::int16_t* p, __m256i v) {
+    _mm256_store_si256(reinterpret_cast<__m256i*>(p), v);
+}
+
+void add_weights_simd(std::int16_t* target, const std::int16_t* weights) {
+    for (int i = 0; i < nnue::kHiddenSize; i += 16)
+        store256(target + i, _mm256_add_epi16(load256(target + i), load256(weights + i)));
+}
+
+template <int Adds, int Subs>
+void fused_update_simd(std::int16_t* dst, const std::int16_t* src,
+                       const std::int16_t* const* adds, const std::int16_t* const* subs) {
     for (int i = 0; i < nnue::kHiddenSize; i += 16) {
-        __m256i t = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(target + i));
-        __m256i w = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(weights + i));
-        _mm256_storeu_si256(reinterpret_cast<__m256i*>(target + i), _mm256_sub_epi16(t, w));
+        __m256i v = load256(src + i);
+        for (int a = 0; a < Adds; ++a) v = _mm256_add_epi16(v, load256(adds[a] + i));
+        for (int s = 0; s < Subs; ++s) v = _mm256_sub_epi16(v, load256(subs[s] + i));
+        store256(dst + i, v);
     }
 }
 #endif
@@ -127,26 +149,46 @@ void add_weights(std::int16_t* target, const std::int16_t* weights) {
 #endif
 }
 
-template <bool Simd>
-void sub_weights(std::int16_t* target, const std::int16_t* weights) {
+template <bool Simd, int Adds, int Subs>
+void fused_update(std::int16_t* dst, const std::int16_t* src,
+                  const std::int16_t* const* adds, const std::int16_t* const* subs) {
 #if defined(__AVX2__)
-    if constexpr (Simd) sub_weights_simd(target, weights);
-    else                sub_weights_scalar(target, weights);
+    if constexpr (Simd) fused_update_simd<Adds, Subs>(dst, src, adds, subs);
+    else                fused_update_scalar<Adds, Subs>(dst, src, adds, subs);
 #else
     static_assert(!Simd, "SIMD accumulator path requires AVX2");
-    sub_weights_scalar(target, weights);
+    fused_update_scalar<Adds, Subs>(dst, src, adds, subs);
 #endif
 }
 
+const std::int16_t* weight_row(int feature) {
+    return network().feature_weights[static_cast<std::size_t>(feature)].vals.data();
+}
+
 template <bool Simd>
-void apply_delta_impl(nnue::AccumulatorPair& acc, const nnue::FeatureDelta& delta) {
-    const auto& net = network();
+void apply_update_impl(nnue::AccumulatorPair& child, const nnue::AccumulatorPair& parent,
+                       const nnue::AccumulatorUpdate& update) {
     for (int perspective = 0; perspective < COLOR_NB; ++perspective) {
-        const int idx = feature_index(static_cast<Color>(perspective), delta.piece, delta.square);
-        const std::int16_t* weights = net.feature_weights[static_cast<std::size_t>(idx)].vals.data();
-        std::int16_t* target = acc.byPerspective[static_cast<std::size_t>(perspective)].vals.data();
-        if (delta.add) add_weights<Simd>(target, weights);
-        else           sub_weights<Simd>(target, weights);
+        const auto feature = [perspective](std::uint16_t whiteIdx) {
+            return (perspective == WHITE) ? whiteIdx : nnue::black_feature(whiteIdx);
+        };
+        const std::int16_t* adds[2] = {};
+        const std::int16_t* subs[2] = {};
+        for (int a = 0; a < update.addCount; ++a)
+            adds[a] = weight_row(feature(update.adds[static_cast<std::size_t>(a)]));
+        for (int s = 0; s < update.subCount; ++s)
+            subs[s] = weight_row(feature(update.subs[static_cast<std::size_t>(s)]));
+
+        const auto p = static_cast<std::size_t>(perspective);
+        std::int16_t*       dst = child.byPerspective[p].vals.data();
+        const std::int16_t* src = parent.byPerspective[p].vals.data();
+        switch (update.addCount * 4 + update.subCount) {
+            case 1 * 4 + 1: fused_update<Simd, 1, 1>(dst, src, adds, subs); break; // quiet, promotion
+            case 1 * 4 + 2: fused_update<Simd, 1, 2>(dst, src, adds, subs); break; // capture, ep
+            case 2 * 4 + 2: fused_update<Simd, 2, 2>(dst, src, adds, subs); break; // castling
+            case 0:         fused_update<Simd, 0, 0>(dst, src, adds, subs); break; // no change
+            default:        assert(false && "unexpected accumulator update shape"); break;
+        }
     }
 }
 
@@ -157,14 +199,6 @@ constexpr bool kUseSimd = true;
 #else
 constexpr bool kUseSimd = false;
 #endif
-
-void apply_delta(nnue::AccumulatorPair& acc, const nnue::FeatureDelta& delta) {
-    apply_delta_impl<kUseSimd>(acc, delta);
-}
-
-void apply_delta_scalar(nnue::AccumulatorPair& acc, const nnue::FeatureDelta& delta) {
-    apply_delta_impl<false>(acc, delta);
-}
 
 // --- SCReLU dot product -----------------------------------------------------
 
@@ -184,10 +218,10 @@ inline __m256i screlu_accumulate(__m256i acc32, const std::int16_t* accVals,
     const __m256i zero = _mm256_setzero_si256();
     const __m256i qa   = _mm256_set1_epi16(static_cast<short>(nnue::kQa));
     for (int i = 0; i < nnue::kHiddenSize; i += 16) {
-        __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(accVals + i));
+        __m256i v = load256(accVals + i);
         v = _mm256_max_epi16(v, zero);   // clamp low  -> [0, .]
         v = _mm256_min_epi16(v, qa);     // clamp high -> [0, QA]
-        __m256i w = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(weights + i));
+        __m256i w = load256(weights + i);
         // |v*w| <= QA*127 < INT16_MAX, so mullo keeps the exact product.
         __m256i weighted = _mm256_mullo_epi16(v, w);
         // madd forms (v*w)*v = v*v*w per lane (fits i32) and pairwise-sums.
@@ -201,7 +235,7 @@ inline __m256i screlu_accumulate(__m256i acc32, const std::int16_t* accVals,
 
 namespace {
 
-template <void (*Apply)(nnue::AccumulatorPair&, const nnue::FeatureDelta&)>
+template <bool Simd>
 void refresh_impl(nnue::AccumulatorPair& acc, const Position& pos) {
     const auto& net = network();
     for (int perspective = 0; perspective < COLOR_NB; ++perspective)
@@ -211,8 +245,11 @@ void refresh_impl(nnue::AccumulatorPair& acc, const Position& pos) {
     while (occ) {
         const Square sq = pop_lsb(occ);
         const Piece piece = pos.piece_on(sq);
-        nnue::FeatureDelta delta { piece, sq, true };
-        Apply(acc, delta);
+        for (int perspective = 0; perspective < COLOR_NB; ++perspective) {
+            const int idx = feature_index(static_cast<Color>(perspective), piece, sq);
+            add_weights<Simd>(acc.byPerspective[static_cast<std::size_t>(perspective)].vals.data(),
+                              weight_row(idx));
+        }
     }
 }
 
@@ -227,16 +264,21 @@ inline Value dequant(std::int32_t sum, std::int16_t output_bias) {
 } // namespace
 
 void nnue::refresh(AccumulatorPair& acc, const Position& pos) {
-    refresh_impl<apply_delta>(acc, pos);
+    refresh_impl<kUseSimd>(acc, pos);
 }
 
 void nnue::refresh_scalar(AccumulatorPair& acc, const Position& pos) {
-    refresh_impl<apply_delta_scalar>(acc, pos);
+    refresh_impl<false>(acc, pos);
 }
 
-void nnue::update(AccumulatorPair& acc, std::span<const FeatureDelta> deltas) {
-    for (const FeatureDelta& delta : deltas)
-        apply_delta(acc, delta);
+void nnue::apply_update(AccumulatorPair& child, const AccumulatorPair& parent,
+                        const AccumulatorUpdate& update) {
+    apply_update_impl<kUseSimd>(child, parent, update);
+}
+
+void nnue::apply_update_scalar(AccumulatorPair& child, const AccumulatorPair& parent,
+                               const AccumulatorUpdate& update) {
+    apply_update_impl<false>(child, parent, update);
 }
 
 Value nnue::evaluate_scalar(const Position& pos) {
@@ -276,4 +318,100 @@ Value nnue::evaluate(const Position& pos) {
 #else
     return evaluate_scalar(pos);
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// AccumulatorStack
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A refresh costs roughly one weight-row pass per piece per perspective, an
+// incremental step about one fused pass, so past this many pending steps a
+// full refresh of the live position is the cheaper route to the same result.
+// Search trees almost never get near it; long UCI move lists do.
+constexpr std::size_t kMaxLazySteps = 16;
+
+} // namespace
+
+nnue::AccumulatorStack::AccumulatorStack(const AccumulatorStack& other)
+    : entries_(other.entries_.begin(),
+               other.entries_.begin() + static_cast<std::ptrdiff_t>(other.top_ + 1)),
+      top_(other.top_) {}
+
+nnue::AccumulatorStack& nnue::AccumulatorStack::operator=(const AccumulatorStack& other) {
+    if (this != &other) {
+        // Reuse our capacity when large enough; copy only the live entries.
+        const auto live = static_cast<std::ptrdiff_t>(other.top_ + 1);
+        if (entries_.size() >= static_cast<std::size_t>(live))
+            std::copy(other.entries_.begin(), other.entries_.begin() + live, entries_.begin());
+        else
+            entries_.assign(other.entries_.begin(), other.entries_.begin() + live);
+        top_ = other.top_;
+    }
+    return *this;
+}
+
+void nnue::AccumulatorStack::clear() {
+    if (entries_.size() < kInitialEntries)
+        entries_.resize(kInitialEntries);
+    top_ = 0;
+    entries_[0].update   = {};
+    entries_[0].computed = false;
+}
+
+void nnue::AccumulatorStack::reset(const Position& pos) {
+    clear();
+    refresh(entries_[0].acc, pos);
+    entries_[0].computed = true;
+}
+
+void nnue::AccumulatorStack::grow() {
+    entries_.resize(std::max(kInitialEntries, 2 * entries_.size()));
+}
+
+const nnue::AccumulatorPair& nnue::AccumulatorStack::materialise(const Position& pos) {
+    // Null-move entries are transparent: evaluate the nearest real ply.
+    std::size_t target = top_;
+    while (target > 0 && entries_[target].update.empty())
+        --target;
+
+    // Walk back to the nearest computed ancestor, counting the real steps.
+    std::size_t base  = target;
+    std::size_t steps = 0;
+    while (!entries_[base].computed && base > 0 && steps <= kMaxLazySteps) {
+        if (!entries_[base].update.empty())
+            ++steps;
+        --base;
+    }
+
+    Entry& dst = entries_[target];
+    if (!entries_[base].computed) {
+        // No computed ancestor within reach (or an unset root): refresh the
+        // live position, which has the same pieces as `target` since only
+        // null moves lie between them.
+        refresh(dst.acc, pos);
+        dst.computed = true;
+    } else {
+        // Apply forward, child written straight from its parent.
+        const AccumulatorPair* parent = &entries_[base].acc;
+        for (std::size_t i = base + 1; i <= target; ++i) {
+            Entry& e = entries_[i];
+            if (e.update.empty())
+                continue;
+            apply_update(e.acc, *parent, e.update);
+            e.computed = true;
+            parent     = &e.acc;
+        }
+    }
+
+#if defined(NNUE_INCREMENTAL_CHECK)
+    // Debug builds: every lazily materialised accumulator must equal a full
+    // refresh of the live position (covers all intermediate steps too, since
+    // the result is their sum).
+    AccumulatorPair scratch;
+    refresh(scratch, pos);
+    assert(scratch.byPerspective == dst.acc.byPerspective);
+#endif
+    return dst.acc;
 }

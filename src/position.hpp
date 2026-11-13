@@ -79,7 +79,10 @@ public:
     int            halfmove_clock() const { return rule50_; }
     int            fullmove_number() const { return fullMove_; }
     Key            key() const { return key_; }
-    const nnue::AccumulatorPair& nnue_accumulators() const { return nnueAccumulators_; }
+    // NNUE accumulators of the current position. They are updated lazily
+    // (make_move only records the feature changes), so this may materialise
+    // them on first use; logically const, hence the mutable stack below.
+    const nnue::AccumulatorPair& nnue_accumulators() const { return nnue_.current(*this); }
 
     bool can_castle(CastlingRights cr) const { return (castling_ & cr) != 0; }
 
@@ -131,10 +134,13 @@ private:
     int            rule50_;
     int            fullMove_;
     Key            key_;
-    nnue::AccumulatorPair nnueAccumulators_;
 
     std::vector<StateInfo> states_;
-    std::vector<nnue::AccumulatorPair> nnueHistory_;
+
+    // One entry per ply since set_fen, pushed/popped in lockstep with states_.
+    // Mutable: nnue_accumulators() const materialises pending lazy updates
+    // (a cache fill that never changes the observable value).
+    mutable nnue::AccumulatorStack nnue_;
 
     // Zobrist keys of every position reached since game setup (back() == key_).
     // Seeded by set_fen and grown/shrunk by make/unmake so repetition detection

@@ -50,7 +50,8 @@ std::string run_engine(const std::string& input) {
 #else
     const std::string& full = cmd;
 #endif
-    std::system(full.c_str());
+    // The exit status is irrelevant: every test inspects stdout instead.
+    [[maybe_unused]] const int rc = std::system(full.c_str());
 
     std::ifstream out(outPath, std::ios::binary);
     std::stringstream buf;

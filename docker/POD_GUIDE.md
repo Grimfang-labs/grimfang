@@ -8,7 +8,8 @@ Deploy Grimfang testing on rented hourly hardware, work, save, destroy.
 
 **One-time setup** (do this once, ever):
 
-1. Commit these files, plus `echo 216361 > tools/BENCH_SIG` and
+1. Commit these files, plus the current `grimfang bench` node count in
+   `tools/BENCH_SIG` (one line), and
    `git add -f tools/books/8moves_v3.epd`
 2. Push to `main`. GitHub Actions builds `ghcr.io/grimfang-labs/grimfang-pod:latest`
 3. Make that package **public** (GitHub → Packages → Settings → visibility)
