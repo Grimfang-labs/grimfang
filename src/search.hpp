@@ -68,6 +68,10 @@ struct Tunables {
     int rfpMargin           = 100;   // centipawns of margin per ply of remaining depth
                                      // (depth - 1 plies when improving)
 
+    // Internal iterative reduction: depth - 1 at depth >= iirMinDepth when
+    // there is no TT move.
+    int iirMinDepth         = 4;
+
     // Late move pruning: at non-PV depth <= lmpMaxDepth, skip the remaining
     // quiets once (lmpBase + depth^2) / (2 - improving) moves were searched.
     int lmpMaxDepth         = 8;

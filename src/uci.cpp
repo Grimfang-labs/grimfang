@@ -61,6 +61,8 @@ const SpinOption kSpinOptions[] = {
     // Reverse futility pruning (static null move).
     { "RfpMaxDepth",         &Search::Tunables::rfpMaxDepth,         4,    16   },
     { "RfpMargin",           &Search::Tunables::rfpMargin,           50,   200  },
+    // Internal iterative reduction (no TT move, depth >= IirMinDepth).
+    { "IirMinDepth",         &Search::Tunables::iirMinDepth,         2,    12   },
     // Late move pruning: limit = (LmpBase + depth^2) / (2 - improving).
     { "LmpMaxDepth",         &Search::Tunables::lmpMaxDepth,         0,    16   },
     { "LmpBase",             &Search::Tunables::lmpBase,             0,    12   },

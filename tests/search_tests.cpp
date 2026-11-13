@@ -141,12 +141,13 @@ TEST_CASE("search: mate in 3", "[search][mate]") {
     // Standard mate-in-3 study (White to play): 1.Nc5-a6+ and mate follows.
     // Checking moves are exempt from futility / SEE pruning: pruning the
     // quiet queen-sacrifice check hid this mate until depth 11. Late move
-    // reductions (which reduce checks one ply less, not zero) delay the
-    // proof to depth 9; depth 10 leaves a ply of slack.
+    // reductions (which reduce checks one ply less, not zero) and internal
+    // iterative reduction delay the proof to depth 11 (~50k nodes); depth 12
+    // leaves a ply of slack.
     Position pos;
     pos.set_fen("1k5r/pP3ppp/3p2b1/1BN1n3/1Q2P3/P1B5/KP3P1P/7q w - - 1 0");
 
-    const Search::Result r = Search::search_fixed(pos, 10);
+    const Search::Result r = Search::search_fixed(pos, 12);
     REQUIRE(mate_in(r.score) == 3);
 }
 

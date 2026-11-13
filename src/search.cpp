@@ -696,6 +696,13 @@ private:
                 return (v >= VALUE_MATE_IN_MAX_PLY) ? beta : v;
         }
 
+        // ---- Internal iterative reduction --------------------------------
+        // No TT move at a deep node: ordering will be poor and the node is
+        // probably not important, so search it one ply shallower (the next
+        // iteration will find a TT move here).
+        if (depth >= t_.iirMinDepth && !ttMove.is_ok())
+            --depth;
+
         MoveList list;
         generate_legal(pos, list);
 
