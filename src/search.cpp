@@ -694,8 +694,13 @@ private:
 
         // Late move pruning: at shallow non-PV nodes, once this many moves
         // have been searched, the remaining quiets are skipped.
-        const bool lmpNode  = !pvNode && !inCheck && depth <= t_.lmpMaxDepth;
-        const int  lmpLimit = (t_.lmpBase + depth * depth) / (2 - improving);
+        const bool pruneNode = !pvNode && !inCheck;
+        const int  lmpLimit  = (t_.lmpBase + depth * depth) / (2 - improving);
+        // Futility: the static eval plus a depth-scaled margin cannot reach
+        // alpha, so no quiet move is expected to either.
+        const bool futile = pruneNode
+                         && depth <= t_.fpMaxDepth
+                         && staticEval + t_.fpBase + t_.fpMargin * depth <= alpha;
         bool       skipQuiets = false;
         int        movesSearched = 0;
 
@@ -721,14 +726,28 @@ private:
             // Only once some move has produced a non-losing score, so the
             // first move is always searched and a mated node is never
             // mis-scored by skipping its only defences.
-            if (isQuiet && lmpNode && bestScore > -VALUE_MATE_IN_MAX_PLY) {
-                if (skipQuiets)
-                    continue;
-                if (movesSearched >= lmpLimit) {
-                    skipQuiets = true;
-                    continue;
+            if (pruneNode && bestScore > -VALUE_MATE_IN_MAX_PLY) {
+                if (isQuiet) {
+                    if (skipQuiets)
+                        continue;
+                    // Late move pruning: every remaining quiet is skipped.
+                    if (depth <= t_.lmpMaxDepth && movesSearched >= lmpLimit) {
+                        skipQuiets = true;
+                        continue;
+                    }
+                } else if (depth <= t_.seePruneMaxDepth
+                           && !see_ge(pos, m, -t_.seeNoisyMargin * depth * depth)) {
+                    continue;   // SEE pruning: the capture loses too much
                 }
             }
+
+            // Futility: no quiet is expected to reach alpha. SEE: the quiet
+            // move hangs material. Both spare checking moves (see below).
+            const bool quietPrunable =
+                   isQuiet && pruneNode && bestScore > -VALUE_MATE_IN_MAX_PLY
+                && (futile
+                    || (depth <= t_.seePruneMaxDepth
+                        && !see_ge(pos, m, -t_.seeQuietMargin * depth)));
 
             ss->move     = m;
             ss->moved    = moved;
@@ -736,6 +755,13 @@ private:
 
             pos.make_move(m);
             const bool givesCheck = pos.checkers() != 0;
+
+            // Futility / SEE pruning of a quiet move, unless it gives check
+            // (only known once the move is made).
+            if (quietPrunable && !givesCheck) {
+                pos.unmake_move(m);
+                continue;
+            }
 
             // Principal Variation Search + late move reductions. The first move
             // gets the full window; later moves get a null-window scout (a non-PV

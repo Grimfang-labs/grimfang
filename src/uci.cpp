@@ -64,6 +64,14 @@ const SpinOption kSpinOptions[] = {
     // Late move pruning: limit = (LmpBase + depth^2) / (2 - improving).
     { "LmpMaxDepth",         &Search::Tunables::lmpMaxDepth,         0,    16   },
     { "LmpBase",             &Search::Tunables::lmpBase,             0,    12   },
+    // Futility pruning: staticEval + FpBase + FpMargin * depth <= alpha.
+    { "FpMaxDepth",          &Search::Tunables::fpMaxDepth,          0,    12   },
+    { "FpBase",              &Search::Tunables::fpBase,              0,    300  },
+    { "FpMargin",            &Search::Tunables::fpMargin,            30,   250  },
+    // SEE pruning thresholds: -SeeQuietMargin*depth, -SeeNoisyMargin*depth^2.
+    { "SeePruneMaxDepth",    &Search::Tunables::seePruneMaxDepth,    0,    16   },
+    { "SeeQuietMargin",      &Search::Tunables::seeQuietMargin,      0,    200  },
+    { "SeeNoisyMargin",      &Search::Tunables::seeNoisyMargin,      0,    100  },
     // Late move reductions.
     { "LmrMinDepth",         &Search::Tunables::lmrMinDepth,         2,    6    },
     { "LmrMinMoveIndex",     &Search::Tunables::lmrMinMoveIndex,     1,    6    },

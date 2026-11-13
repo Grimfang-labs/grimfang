@@ -73,6 +73,19 @@ struct Tunables {
     int lmpMaxDepth         = 8;
     int lmpBase             = 3;
 
+    // Futility pruning: at non-PV depth <= fpMaxDepth, skip the remaining
+    // quiets when staticEval + fpBase + fpMargin * depth <= alpha.
+    int fpMaxDepth          = 6;
+    int fpBase              = 80;
+    int fpMargin            = 90;
+
+    // SEE pruning at non-PV depth <= seePruneMaxDepth: skip a quiet with
+    // SEE < -seeQuietMargin * depth, a noisy move with
+    // SEE < -seeNoisyMargin * depth^2.
+    int seePruneMaxDepth    = 8;
+    int seeQuietMargin      = 60;
+    int seeNoisyMargin      = 25;
+
     // Late move reductions.
     int lmrMinDepth         = 3;     // node depth at/above which LMR may reduce
     int lmrMinMoveIndex     = 3;     // 0-based move index from which LMR may reduce

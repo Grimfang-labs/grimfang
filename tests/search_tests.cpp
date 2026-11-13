@@ -139,12 +139,12 @@ TEST_CASE("search: mate in 2", "[search][mate]") {
 
 TEST_CASE("search: mate in 3", "[search][mate]") {
     // Standard mate-in-3 study (White to play): 1.Nc5-a6+ and mate follows.
-    // Shallow-depth pruning (late move pruning) delays the proof by a ply or
-    // so: it is found at depth 8 today; depth 9 leaves a little slack.
+    // Checking moves are exempt from futility / SEE pruning: pruning the
+    // quiet queen-sacrifice check hid this mate until depth 11.
     Position pos;
     pos.set_fen("1k5r/pP3ppp/3p2b1/1BN1n3/1Q2P3/P1B5/KP3P1P/7q w - - 1 0");
 
-    const Search::Result r = Search::search_fixed(pos, 9);
+    const Search::Result r = Search::search_fixed(pos, 7);
     REQUIRE(mate_in(r.score) == 3);
 }
 
