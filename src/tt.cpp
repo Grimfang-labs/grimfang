@@ -124,7 +124,10 @@ void TranspositionTable::store(Key key, Move m, Value v, Value eval,
     if (b == BOUND_EXACT || !sameSlot || depth + 4 > target->depth8) {
         target->key32     = k32;
         target->value16   = static_cast<std::int16_t>(value_to_tt(v, ply));
-        target->eval16    = static_cast<std::int16_t>(eval);
+        // Keep a cached static eval of the same position when the new store
+        // carries none (e.g. an in-check node).
+        if (eval != VALUE_NONE || !sameSlot)
+            target->eval16 = static_cast<std::int16_t>(eval);
         target->depth8    = static_cast<std::uint8_t>(depth);
         target->genBound8 = static_cast<std::uint8_t>(generation8_ | b);
     }

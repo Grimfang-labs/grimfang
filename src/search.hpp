@@ -78,6 +78,10 @@ struct Tunables {
     int lmrPvReduction      = 1;     // R reduction applied at PV nodes
     int lmrKillerReduction  = 1;     // R reduction applied to killer moves
 
+    // Quiescence delta pruning: skip a non-promotion capture when
+    // standPat + victim value + margin <= alpha.
+    int qsDeltaMargin       = 200;   // centipawns
+
     // History heuristic: bonus = min(mult * depth * depth / 100, cap).
     int historyBonusMultPct = 100;   // bonus multiplier, percent (100 == 1.0)
     int historyBonusCap     = 1600;  // clamp on the depth-scaled bonus

@@ -334,74 +334,127 @@ private:
         sync_cout(oss.str());
     }
 
-    // ---- Quiescence ----------------------------------------------------
-    // Stand-pat is illegal while in check: search every legal evasion instead.
-    // bestScore starts at -VALUE_MATE + ply so a checkmated node (zero evasions)
-    // returns a mate score. Non-check path below is unchanged (fail-hard,
-    // captures-only, no TT / delta pruning).
-    Value quiescence(Position& pos, Value alpha, Value beta, int ply) {
+    // ---- Quiescence (fail-soft) -----------------------------------------
+    // Captures/promotions only, from a stand-pat bound; every legal evasion
+    // when in check (no stand-pat: bestScore starts at -VALUE_MATE + ply so a
+    // checkmated node with zero evasions returns a mate score).
+    //
+    // The TT is probed (cutoffs at non-PV nodes with any stored depth, the TT
+    // move ordered first) and written at exit with depth 0. The cached static
+    // eval is reused on a hit, and a bound-compatible TT score tightens the
+    // stand-pat. Losing captures (SEE < 0) and captures that cannot lift the
+    // stand-pat to alpha even with a margin (delta pruning) are skipped.
+    Value quiescence(Position& pos, Value alpha, Value beta, int ply, bool pvNode) {
         ++nodes_;
         if (ply > seldepth_) seldepth_ = ply;
         if (should_stop())   return alpha;
         if (ply >= MAX_PLY - 1)
             return Eval::evaluate(pos);
 
-        if (pos.checkers() != 0) {
-            Value bestScore = static_cast<Value>(-VALUE_MATE + ply);
-            MoveList evasions;
-            generate_legal(pos, evasions);
-            int scores[MoveList::CAPACITY];
-            order_moves(pos, evasions, MOVE_NONE, MOVE_NONE, MOVE_NONE, scores);
+        const Key  key     = pos.key();
+        const bool inCheck = pos.checkers() != 0;
 
-            for (int i = 0; i < evasions.count; ++i) {
-                const Move m = evasions.moves[i];
-                pos.make_move(m);
-                const Value score = -quiescence(pos, -beta, -alpha, ply + 1);
-                pos.unmake_move(m);
+        // ---- Transposition-table probe ---------------------------------
+        // Copy what we need out of the entry now: deeper recursion can
+        // overwrite the slot the pointer refers to.
+        TTEntry*   tte     = nullptr;
+        const bool ttHit   = TT.probe(key, tte);
+        const Move  ttMove  = ttHit ? tte->move() : MOVE_NONE;
+        const Value ttValue = ttHit ? value_from_tt(tte->value(), ply) : VALUE_NONE;
+        const Value ttEval  = ttHit ? tte->eval() : VALUE_NONE;
+        const Bound ttBound = ttHit ? tte->bound() : BOUND_NONE;
 
-                if (aborted_)
-                    return alpha;
-                if (score > bestScore)
-                    bestScore = score;
-                if (score >= beta)
-                    return beta;
-                if (score > alpha)
-                    alpha = score;
+        if (ttHit && !pvNode
+            && (ttBound == BOUND_EXACT
+                || (ttBound == BOUND_LOWER && ttValue >= beta)
+                || (ttBound == BOUND_UPPER && ttValue <= alpha)))
+            return ttValue;
+
+        const Value alphaOrig = alpha;
+        Value bestScore;
+        Value staticEval = VALUE_NONE;
+        Value standPat   = VALUE_NONE;
+
+        if (inCheck) {
+            bestScore = static_cast<Value>(-VALUE_MATE + ply);
+        } else {
+            staticEval = (ttEval != VALUE_NONE) ? ttEval : Eval::evaluate(pos);
+            standPat   = staticEval;
+
+            // A TT score is a better estimate than the static eval when its
+            // bound points the right way (never trust a mate score here).
+            if (ttHit
+                && std::abs(ttValue) < VALUE_MATE_IN_MAX_PLY
+                && (ttBound & (ttValue > standPat ? BOUND_LOWER : BOUND_UPPER)))
+                standPat = ttValue;
+
+            bestScore = standPat;
+            if (bestScore >= beta) {
+                if (!ttHit)
+                    TT.store(key, MOVE_NONE, bestScore, staticEval, 0, BOUND_LOWER, ply);
+                return bestScore;
             }
-            return bestScore;
+            if (bestScore > alpha)
+                alpha = bestScore;
         }
 
-        const Value standPat = Eval::evaluate(pos);
-        if (standPat >= beta)
-            return beta;
-        if (standPat > alpha)
-            alpha = standPat;
-
-        MoveList caps;
-        generate_captures(pos, caps);
+        MoveList list;
+        if (inCheck)
+            generate_legal(pos, list);
+        else
+            generate_captures(pos, list);
         int scores[MoveList::CAPACITY];
-        order_moves(pos, caps, MOVE_NONE, MOVE_NONE, MOVE_NONE, scores);
+        order_moves(pos, list, ttMove, MOVE_NONE, MOVE_NONE, scores);
 
-        for (int i = 0; i < caps.count; ++i) {
-            const Move m = caps.moves[i];
+        Move bestMove = MOVE_NONE;
 
-            // Losing captures (SEE < 0) cannot raise the stand-pat bound in
-            // expectation; skip them. They carry a negative ordering score.
-            if (scores[i] < 0)
-                break;
+        for (int i = 0; i < list.count; ++i) {
+            const Move m = list.moves[i];
+
+            if (!inCheck) {
+                // Losing captures (SEE < 0) carry a negative ordering score
+                // and are sorted last: stop at the first one.
+                if (scores[i] < 0)
+                    break;
+
+                // Delta pruning: even winning the victim outright plus a
+                // margin cannot reach alpha. Promotions are never pruned.
+                if (m.type_of() != PROMOTION) {
+                    const PieceType victim = (m.type_of() == EN_PASSANT)
+                                                 ? PAWN
+                                                 : type_of(pos.piece_on(m.to_sq()));
+                    const Value futility = standPat + orderValue[victim] + t_.qsDeltaMargin;
+                    if (futility <= alpha) {
+                        bestScore = std::max(bestScore, futility);
+                        continue;
+                    }
+                }
+            }
 
             pos.make_move(m);
-            const Value score = -quiescence(pos, -beta, -alpha, ply + 1);
+            const Value score = -quiescence(pos, -beta, -alpha, ply + 1, pvNode);
             pos.unmake_move(m);
 
             if (aborted_)
                 return alpha;
-            if (score >= beta)
-                return beta;
-            if (score > alpha)
-                alpha = score;
+
+            if (score > bestScore) {
+                bestScore = score;
+                if (score > alpha) {
+                    bestMove = m;
+                    if (score >= beta)
+                        break;
+                    alpha = score;
+                }
+            }
         }
-        return alpha;
+
+        const Bound bound = (bestScore >= beta)     ? BOUND_LOWER
+                          : (bestScore > alphaOrig) ? BOUND_EXACT
+                                                    : BOUND_UPPER;
+        TT.store(key, bestMove, bestScore, staticEval, 0, bound, ply);
+
+        return bestScore;
     }
 
     // ---- Negamax alpha-beta (fail-soft) --------------------------------
@@ -418,32 +471,37 @@ private:
             return VALUE_DRAW;
 
         if (depth <= 0)
-            return quiescence(pos, alpha, beta, ply);
+            return quiescence(pos, alpha, beta, ply, pvNode);
 
         const Key   key        = pos.key();
         const Value alphaOrig  = alpha;
         const bool  inCheck    = pos.checkers() != 0;
 
         // ---- Transposition-table probe ---------------------------------
-        TTEntry*   tte    = nullptr;
-        const bool ttHit  = TT.probe(key, tte);
-        const Move ttMove = ttHit ? tte->move() : MOVE_NONE;
+        // Copy every field we need right away: the entry pointer can be
+        // overwritten by stores made during deeper recursion.
+        TTEntry*   tte     = nullptr;
+        const bool ttHit   = TT.probe(key, tte);
+        const Move  ttMove  = ttHit ? tte->move() : MOVE_NONE;
+        const Value ttValue = ttHit ? value_from_tt(tte->value(), ply) : VALUE_NONE;
+        const Value ttEval  = ttHit ? tte->eval() : VALUE_NONE;
+        const int   ttDepth = ttHit ? tte->depth() : -1;
+        const Bound ttBound = ttHit ? tte->bound() : BOUND_NONE;
 
         // A sufficiently deep entry can cut, but only at a non-PV, non-root
         // node so the principal variation is always searched in full.
-        if (ttHit && !pvNode && ply > 0 && tte->depth() >= depth) {
-            const Value ttValue = value_from_tt(tte->value(), ply);
-            const Bound b       = tte->bound();
-            if (b == BOUND_EXACT
-                || (b == BOUND_LOWER && ttValue >= beta)
-                || (b == BOUND_UPPER && ttValue <= alpha))
+        if (ttHit && !pvNode && ply > 0 && ttDepth >= depth) {
+            if (ttBound == BOUND_EXACT
+                || (ttBound == BOUND_LOWER && ttValue >= beta)
+                || (ttBound == BOUND_UPPER && ttValue <= alpha))
                 return ttValue;
         }
 
-        // Static eval of this node (side-relative). Computed once for non-check
-        // nodes; used by null-move pruning now and by RFP next rung. Meaningless
-        // when in check, so left as VALUE_NONE there.
-        const Value staticEval = inCheck ? VALUE_NONE : Eval::evaluate(pos);
+        // Static eval of this node (side-relative), reused from the TT when
+        // cached. Meaningless when in check, so left as VALUE_NONE there.
+        const Value staticEval = inCheck            ? VALUE_NONE
+                               : ttEval != VALUE_NONE ? ttEval
+                                                      : Eval::evaluate(pos);
 
         // ---- Reverse futility pruning (static null move) ---------------
         // Cheapest pruner: no search at all. If the static eval is so far above
@@ -604,8 +662,7 @@ private:
         const Bound bound = (bestScore >= beta)     ? BOUND_LOWER
                           : (bestScore > alphaOrig) ? BOUND_EXACT
                                                     : BOUND_UPPER;
-        // Static eval is not cached at internal nodes yet (RFP/NMP rung).
-        TT.store(key, bestMove, bestScore, VALUE_NONE, depth, bound, ply);
+        TT.store(key, bestMove, bestScore, staticEval, depth, bound, ply);
 
         return bestScore;
     }
