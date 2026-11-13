@@ -17,6 +17,7 @@ add_executable(grimfang_tests
   tt_tests.cpp
   killers_tests.cpp
   history_tests.cpp
+  see_tests.cpp
   nullmove_tests.cpp
   lmr_tests.cpp
   datagen_tests.cpp

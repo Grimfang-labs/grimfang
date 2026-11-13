@@ -12,6 +12,7 @@
 #include "killers.hpp"
 #include "movegen.hpp"
 #include "position.hpp"
+#include "see.hpp"
 #include "sync.hpp"
 #include "timeman.hpp"
 #include "tt.hpp"
@@ -19,14 +20,15 @@
 // ===========================================================================
 // search.cpp - negamax alpha-beta + quiescence + iterative deepening.
 //
-// Move ordering (Stage 3): the transposition-table move first, then captures
-// by MVV-LVA, then quiet moves in generation order. A shared transposition
+// Move ordering: the transposition-table move first, then captures that do
+// not lose material (static exchange evaluation >= 0) by MVV-LVA, then quiet
+// moves, then losing captures (SEE < 0). A shared transposition
 // table provides depth-preferred cutoffs at non-PV nodes and a best-move hint
 // everywhere. Mate scores are made node-relative on store / re-rooted on probe.
 // Quiet moves that cause a beta cutoff are remembered as killers (two per ply)
 // and ordered ahead of generic quiets; a butterfly history table (rewarded on
 // quiet cutoffs, penalised for quiets tried first) orders the remaining quiets.
-// No SEE yet.
+// Quiescence skips captures that lose material by SEE.
 //
 // PV-node classification: a node is a PV node iff it is reached by always
 // following the first (best) move from the root. TT cutoffs are taken only at
@@ -39,12 +41,17 @@
 
 namespace {
 
-// Static piece values used purely for MVV-LVA move ordering.
-constexpr int orderValue[PIECE_TYPE_NB] = { 100, 320, 330, 500, 900, 20000 };
+// Static piece values used for MVV-LVA move ordering (shared with SEE).
+constexpr const int (&orderValue)[PIECE_TYPE_NB] = SEE::VALUE;
 
-constexpr int CAPTURE_BONUS   = 1'000'000;
-constexpr int PROMOTION_BONUS =   900'000;
-constexpr int TT_MOVE_BONUS   = 10'000'000;   // root previous-best move
+constexpr int CAPTURE_BONUS     =  1'000'000;
+constexpr int PROMOTION_BONUS   =    900'000;
+constexpr int TT_MOVE_BONUS     = 10'000'000;   // root previous-best move
+// Losing captures (SEE < 0) are ordered after every quiet move: this base plus
+// any MVV-LVA term stays far below the lowest history score (-MAX_HISTORY).
+constexpr int BAD_CAPTURE_BONUS = -1'000'000;
+static_assert(BAD_CAPTURE_BONUS + 16 * 20000 < -MAX_HISTORY,
+              "bad captures must order below every quiet move");
 
 // Poll the stop conditions roughly every this many nodes.
 constexpr std::uint64_t POLL_INTERVAL = 2048;
@@ -254,34 +261,40 @@ private:
         const bool     isEp = (mt == EN_PASSANT);
         const bool     isCapture = isEp || (pos.piece_on(to) != NO_PIECE);
 
-        int score = 0;
-        if (isCapture) {
-            const PieceType victim   = isEp ? PAWN : type_of(pos.piece_on(to));
-            const PieceType attacker = type_of(pos.piece_on(m.from_sq()));
-            score = CAPTURE_BONUS + orderValue[victim] * 16 - orderValue[attacker];
-        }
-        if (mt == PROMOTION)
-            score += PROMOTION_BONUS + orderValue[m.promotion_type()];
-
-        // Quiet move (no capture/promotion signal): killers first, then order
-        // the rest by history. History values (|.| < MAX_HISTORY) sit far below
-        // the killer band, so the total order stays TT > captures > K1 > K2 >
-        // history-sorted quiets.
-        if (score == 0) {
+        // Quiet move (no capture/promotion): killers first, then order the
+        // rest by history. History values (|.| < MAX_HISTORY) sit far below
+        // the killer band and far above the bad-capture band, so the total
+        // order is TT > good captures/promotions > K1 > K2 > history-sorted
+        // quiets > losing captures.
+        if (!isCapture && mt != PROMOTION) {
             const int kb = killer_bonus(m, k1, k2);
             if (kb)
                 return kb;
             return history_.get(pos.side_to_move(), m);
         }
 
+        int score = 0;
+        if (isCapture) {
+            const PieceType victim   = isEp ? PAWN : type_of(pos.piece_on(to));
+            const PieceType attacker = type_of(pos.piece_on(m.from_sq()));
+            // SEE can only come out negative when the attacker is worth more
+            // than the victim; otherwise skip the exchange evaluation.
+            const bool good = orderValue[victim] >= orderValue[attacker]
+                           || see_ge(pos, m, 0);
+            score = (good ? CAPTURE_BONUS : BAD_CAPTURE_BONUS)
+                  + orderValue[victim] * 16 - orderValue[attacker];
+        }
+        if (mt == PROMOTION)
+            score += PROMOTION_BONUS + orderValue[m.promotion_type()];
+
         return score;
     }
 
     // Stable insertion sort, descending by score (ties keep generation order).
     // k1/k2 are this ply's killers (MOVE_NONE to disable, e.g. in quiescence).
+    // On return scores[i] is the ordering score of list.moves[i].
     void order_moves(const Position& pos, MoveList& list, Move ttMove,
-                     Move k1, Move k2) const {
-        int scores[MoveList::CAPACITY];
+                     Move k1, Move k2, int* scores) const {
         for (int i = 0; i < list.count; ++i)
             scores[i] = score_move(pos, list.moves[i], ttMove, k1, k2);
 
@@ -337,7 +350,8 @@ private:
             Value bestScore = static_cast<Value>(-VALUE_MATE + ply);
             MoveList evasions;
             generate_legal(pos, evasions);
-            order_moves(pos, evasions, MOVE_NONE, MOVE_NONE, MOVE_NONE);
+            int scores[MoveList::CAPACITY];
+            order_moves(pos, evasions, MOVE_NONE, MOVE_NONE, MOVE_NONE, scores);
 
             for (int i = 0; i < evasions.count; ++i) {
                 const Move m = evasions.moves[i];
@@ -365,10 +379,17 @@ private:
 
         MoveList caps;
         generate_captures(pos, caps);
-        order_moves(pos, caps, MOVE_NONE, MOVE_NONE, MOVE_NONE);
+        int scores[MoveList::CAPACITY];
+        order_moves(pos, caps, MOVE_NONE, MOVE_NONE, MOVE_NONE, scores);
 
         for (int i = 0; i < caps.count; ++i) {
             const Move m = caps.moves[i];
+
+            // Losing captures (SEE < 0) cannot raise the stand-pat bound in
+            // expectation; skip them. They carry a negative ordering score.
+            if (scores[i] < 0)
+                break;
+
             pos.make_move(m);
             const Value score = -quiescence(pos, -beta, -alpha, ply + 1);
             pos.unmake_move(m);
@@ -471,7 +492,9 @@ private:
             return inCheck ? static_cast<Value>(-(VALUE_MATE - ply))
                            : VALUE_DRAW;
 
-        order_moves(pos, list, ttMove, killers_.primary(ply), killers_.secondary(ply));
+        int scores[MoveList::CAPACITY];
+        order_moves(pos, list, ttMove, killers_.primary(ply), killers_.secondary(ply),
+                    scores);
 
         Value bestScore = -VALUE_INFINITE;
         Move  bestMove  = MOVE_NONE;

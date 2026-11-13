@@ -92,6 +92,7 @@ add_library(grimfang_core STATIC
   src/eval.cpp
   src/nnue.cpp
   src/tt.cpp
+  src/see.cpp
   src/search.cpp
   src/timeman.cpp
   src/uci.cpp
