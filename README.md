@@ -10,7 +10,7 @@ NNUE evaluation.
 
 | Release | Notes |
 |---------|--------|
-| **Sköll** | NNUE-launch milestone (bench `210851`) |
+| **Sköll** | NNUE-launch milestone (bench `210851` at the then-default depth 6) |
 
 Codename history lives here (and in git tags such as `v1.0-skoll`); the engine
 binary and UCI `id name` stay **Grimfang** across milestones.
@@ -24,7 +24,12 @@ cmake --build build --config Release
 # tests:   ctest --test-dir build -C Release
 ```
 
-`grimfang bench` prints the deterministic search signature (node count).
+`grimfang bench [depth]` prints the deterministic search signature (node count,
+default depth 12). The current signature is recorded in
+[`tools/BENCH_SIG`](tools/BENCH_SIG); every search change updates it.
+
+Release builds use link-time optimization when the toolchain supports it
+(`-DGRIMFANG_LTO=OFF` disables it). LTO does not change the bench signature.
 
 ## Testing / SPRT harness
 

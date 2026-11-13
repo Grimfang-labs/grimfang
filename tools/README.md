@@ -68,10 +68,11 @@ must yield an identical signature every run; a mismatch means non-determinism
 crept in — fix it before trusting any game result. The printed number is the
 bench signature to record in the merge commit.
 
-For a pure refactor, also assert the signature is unchanged:
+For a pure refactor, also assert the signature is unchanged (the current
+signature lives in `tools/BENCH_SIG`):
 
 ```powershell
-./tools/bench_check.ps1 -Exe NEW.exe -Expect 14717091
+./tools/bench_check.ps1 -Exe NEW.exe -Expect (Get-Content tools/BENCH_SIG)
 ```
 
 ## Running the SPRT
@@ -198,7 +199,7 @@ Update as rungs pass/fail (record bench + rough Elo from the SPRT log):
 
 | #    | Feature                              | Status   | Bench | Elo (SPRT) |
 |------|--------------------------------------|----------|-------|------------|
-| —    | Stage 2 baseline                     | frozen   | 14717091 | —       |
+| —    | Stage 2 baseline (bench depth 6)     | frozen   | 14717091 | —       |
 | 3.1  | Transposition table (+ TT-move ord.) | pending  |       |            |
 | 3.2  | Principal Variation Search (PVS)     | pending  |       |            |
 | 3.3  | Killer moves                         | pending  |       |            |

@@ -26,8 +26,8 @@
     ./tools/bench_check.ps1 -Exe build/Release/grimfang.exe
 
 .EXAMPLE
-    # Assert a refactor kept the Stage 2 baseline signature unchanged.
-    ./tools/bench_check.ps1 -Exe NEW.exe -Expect 14717091
+    # Assert a refactor kept the recorded signature unchanged.
+    ./tools/bench_check.ps1 -Exe NEW.exe -Expect (Get-Content tools/BENCH_SIG)
 #>
 [CmdletBinding()]
 param(

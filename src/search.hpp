@@ -8,11 +8,10 @@
 #include "types.hpp"
 
 // ===========================================================================
-// search.hpp - negamax alpha-beta + quiescence + iterative deepening.
-//
-// Stage 2 has no transposition table, killers, history or SEE: move ordering
-// is captures-first by MVV-LVA, quiet moves in generation order, plus the
-// previous iteration's best move tried first at the root.
+// search.hpp - public search interface: iterative-deepening negamax PVS with
+// a transposition table, null-move / reverse-futility pruning, late move
+// reductions, killer + history move ordering and aspiration windows. See the
+// header block in search.cpp for the details of each technique.
 // ===========================================================================
 
 class Position;
@@ -111,9 +110,10 @@ Result search_fixed(Position& pos, int depth, bool useAspiration);
 Result search_nodes(Position& pos, std::uint64_t nodeLimit, std::atomic<bool>& stop);
 Result search_nodes(Position& pos, std::uint64_t nodeLimit);
 
-// Default depth for `bench` (chosen to run in a few seconds single-threaded).
-// Signature at this depth: 14717091 nodes.
-constexpr int BENCH_DEFAULT_DEPTH = 6;
+// Default depth for `bench` (chosen so the signature is a few million nodes
+// and runs in a few seconds single-threaded). The current signature at this
+// depth is recorded in tools/BENCH_SIG (it changes with every search change).
+constexpr int BENCH_DEFAULT_DEPTH = 12;
 
 // Search a fixed list of positions to a fixed depth with time management
 // disabled, printing an OpenBench-compatible summary. The total node count is
