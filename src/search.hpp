@@ -86,16 +86,24 @@ struct Tunables {
     int seeQuietMargin      = 60;
     int seeNoisyMargin      = 25;
 
-    // Late move reductions.
+    // Late move reductions. The base reduction comes from a precomputed
+    // table, in plies:  base/100 + ln(depth) * ln(moveNumber) / (div/100),
+    // separately for quiet and noisy moves. Adjustments below are in
+    // hundredths of a ply; the final reduction is rounded and clamped so the
+    // reduced search keeps depth >= 1.
     int lmrMinDepth         = 3;     // node depth at/above which LMR may reduce
-    int lmrMinMoveIndex     = 3;     // 0-based move index from which LMR may reduce
-    int lmrBaseReduction    = 3;     // starting R for an eligible late quiet move
-    int lmrDepth6Extra      = 1;     // extra R once depth >= lmrDepth6At
-    int lmrDepth6At         = 6;     // depth threshold for lmrDepth6Extra
-    int lmrDeepExtra        = 1;     // extra R once move index >= lmrDeepAt
-    int lmrDeepAt           = 12;    // move-index threshold for lmrDeepExtra
-    int lmrPvReduction      = 1;     // R reduction applied at PV nodes
-    int lmrKillerReduction  = 1;     // R reduction applied to killer moves
+    int lmrMinMoveIndex     = 3;     // moves already searched before LMR may reduce
+    int lmrQuietBasePct     = 80;    // quiet table: constant term (x100)
+    int lmrQuietDivPct      = 240;   // quiet table: ln*ln divisor (x100)
+    int lmrNoisyBasePct     = 0;     // noisy table: constant term (x100)
+    int lmrNoisyDivPct      = 320;   // noisy table: ln*ln divisor (x100)
+    int lmrPvPct            = 100;   // less at PV nodes
+    int lmrCheckPct         = 100;   // less when the move gives check
+    int lmrKillerPct        = 100;   // less for killers
+    int lmrImprovingPct     = 100;   // more when not improving
+    int lmrTtCapturePct     = 100;   // more when the TT move is a capture
+    int lmrCutNodePct       = 100;   // more at expected cut nodes
+    int lmrHistoryDiv       = 8000;  // quiet history / div plies less (more if < 0)
 
     // Quiescence delta pruning: skip a non-promotion capture when
     // standPat + victim value + margin <= alpha.
@@ -105,6 +113,11 @@ struct Tunables {
     int historyBonusMultPct = 100;   // bonus multiplier, percent (100 == 1.0)
     int historyBonusCap     = 1600;  // clamp on the depth-scaled bonus
 };
+
+// Base LMR reduction before adjustments, in 1/1024 ply, for a move that is
+// the moveNumber-th (1-based) searched at a node of the given depth. Exposed
+// for tests; the search uses a table filled from this function.
+int lmr_base_reduction(const Tunables& t, bool quiet, int depth, int moveNumber);
 
 // The live tunable values, updated by UCI `setoption` (see uci.cpp).
 const Tunables& active_tunables();

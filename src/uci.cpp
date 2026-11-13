@@ -72,16 +72,21 @@ const SpinOption kSpinOptions[] = {
     { "SeePruneMaxDepth",    &Search::Tunables::seePruneMaxDepth,    0,    16   },
     { "SeeQuietMargin",      &Search::Tunables::seeQuietMargin,      0,    200  },
     { "SeeNoisyMargin",      &Search::Tunables::seeNoisyMargin,      0,    100  },
-    // Late move reductions.
+    // Late move reductions: table R = base/100 + ln(d)*ln(m)/(div/100), then
+    // adjustments in hundredths of a ply.
     { "LmrMinDepth",         &Search::Tunables::lmrMinDepth,         2,    6    },
     { "LmrMinMoveIndex",     &Search::Tunables::lmrMinMoveIndex,     1,    6    },
-    { "LmrBaseReduction",    &Search::Tunables::lmrBaseReduction,    0,    4    },
-    { "LmrDepth6Extra",      &Search::Tunables::lmrDepth6Extra,      0,    4    },
-    { "LmrDepth6At",         &Search::Tunables::lmrDepth6At,         4,    12   },
-    { "LmrDeepExtra",        &Search::Tunables::lmrDeepExtra,        0,    4    },
-    { "LmrDeepAt",           &Search::Tunables::lmrDeepAt,           6,    24   },
-    { "LmrPvReduction",      &Search::Tunables::lmrPvReduction,      0,    4    },
-    { "LmrKillerReduction",  &Search::Tunables::lmrKillerReduction,  0,    4    },
+    { "LmrQuietBasePct",     &Search::Tunables::lmrQuietBasePct,     -100, 300  },
+    { "LmrQuietDivPct",      &Search::Tunables::lmrQuietDivPct,      100,  500  },
+    { "LmrNoisyBasePct",     &Search::Tunables::lmrNoisyBasePct,     -200, 300  },
+    { "LmrNoisyDivPct",      &Search::Tunables::lmrNoisyDivPct,      100,  800  },
+    { "LmrPvPct",            &Search::Tunables::lmrPvPct,            0,    300  },
+    { "LmrCheckPct",         &Search::Tunables::lmrCheckPct,         0,    300  },
+    { "LmrKillerPct",        &Search::Tunables::lmrKillerPct,        0,    300  },
+    { "LmrImprovingPct",     &Search::Tunables::lmrImprovingPct,     0,    300  },
+    { "LmrTtCapturePct",     &Search::Tunables::lmrTtCapturePct,     0,    300  },
+    { "LmrCutNodePct",       &Search::Tunables::lmrCutNodePct,       0,    300  },
+    { "LmrHistoryDiv",       &Search::Tunables::lmrHistoryDiv,       2000, 32000 },
     // Quiescence delta pruning margin (cp).
     { "QsDeltaMargin",       &Search::Tunables::qsDeltaMargin,       50,   600  },
     // History: bonus = min(depth*depth * HistoryBonusMultPct/100, HistoryBonusCap).

@@ -108,18 +108,18 @@ R_END = 0.015
 #                             cap binds only at depth >= 40. At 8+0.08 you search
 #                             depth 12-18, so its gradient is identically zero and
 #                             it only injects noise into the other dimensions.
-#   LmrBaseReduction, LmrDepth6Extra, LmrDeepExtra,
-#   LmrPvReduction, LmrKillerReduction   -- 3-value domains (0..2). SPSA perturbs
-#                             integers by >= 1, i.e. 50% of range, so the gradient
-#                             sign is a coin flip. Test these as individual SPRTs.
+#   LmrPvPct, LmrCheckPct, LmrKillerPct, LmrImprovingPct, LmrTtCapturePct,
+#   LmrCutNodePct, LmrNoisy*  -- the log-table LMR adjustments (hundredths of a
+#                             ply) are left for a later batch; the table's
+#                             quiet base and divisor are tuned here.
 #   NmpBase, NmpDepthDiv   -- saturate: NmpBase=6 and NmpDepthDiv=1 both produce
 #                             exactly 746,690 nodes at bench depth 8, meaning R
 #                             clamps identically. The upper half of both ranges is
 #                             a plateau. Test as individual SPRTs.
 #
-# c_end ~= range/20, floored at 1 for integers, raised to 2 for RfpMaxDepth and
-# LmrDeepAt whose ranges (12 and 18) tolerate a wider probe and whose signal is
-# otherwise too weak to move them. If a parameter flatlines, raise its c_end;
+# c_end ~= range/20, floored at 1 for integers, raised to 2 for RfpMaxDepth
+# whose range (12) tolerates a wider probe and whose signal is otherwise too
+# weak to move it. If a parameter flatlines, raise its c_end;
 # if it pins to a bound constantly, lower it.
 # --------------------------------------------------------------------------
 
@@ -130,8 +130,8 @@ PARAMS: dict[str, dict[str, float]] = {
     "RfpMaxDepth":         {"start":   8, "min":   4, "max":  16, "c_end":  2},
     "LmrMinDepth":         {"start":   3, "min":   2, "max":   6, "c_end":  1},
     "LmrMinMoveIndex":     {"start":   3, "min":   1, "max":   6, "c_end":  1},
-    "LmrDepth6At":         {"start":   6, "min":   2, "max":  12, "c_end":  2},
-    "LmrDeepAt":           {"start":  12, "min":   6, "max":  24, "c_end":  2},
+    "LmrQuietBasePct":     {"start":  80, "min": -100, "max": 300, "c_end": 15},
+    "LmrQuietDivPct":      {"start": 240, "min": 100, "max": 500, "c_end": 20},
     "HistoryBonusMultPct": {"start": 100, "min":  50, "max": 200, "c_end":  8},
 }
 

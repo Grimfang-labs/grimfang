@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -33,6 +34,11 @@
 // any cutoff move are penalised in capture history. All history tables are
 // kept across the searches of one game (ThreadData).
 // Quiescence skips captures that lose material by SEE.
+//
+// Late move reductions: R from a log(depth) * log(moveNumber) table (quiet
+// and noisy variants), adjusted for PV / cut nodes, checks, killers, the
+// improving flag, a capture TT move and the quiet history score; a reduced
+// probe that beats alpha is re-searched at full depth.
 //
 // PV-node classification: a node is a PV node iff it is reached by always
 // following the first (best) move from the root. TT cutoffs are taken only at
@@ -142,6 +148,10 @@ public:
         // then reads plain struct members (t_.*) -- no global lookup, no
         // indirection, so NPS is unaffected by exposing these as options.
         t_ = Search::active_tunables();
+        for (int q = 0; q < 2; ++q)
+            for (int d = 0; d < LMR_TABLE_SIZE; ++d)
+                for (int n = 0; n < LMR_TABLE_SIZE; ++n)
+                    lmrTable_[q][d][n] = Search::lmr_base_reduction(t_, q == 1, d, n);
 
         // One search == one generation. Entries from earlier searches stay in
         // the table but age out under replacement. Killers are search-local
@@ -211,7 +221,7 @@ public:
             Value score = 0;
             while (true) {
                 score = negamax(pos, depth, alpha, beta, 0,
-                                /*pvNode=*/true, /*prevWasNull=*/false);
+                                /*pvNode=*/true, /*cutNode=*/false, /*prevWasNull=*/false);
                 if (aborted_)
                     break;
 
@@ -285,6 +295,11 @@ private:
     int  pvLength_[MAX_PLY] = { 0 };
 
     StackEntry stack_[MAX_PLY + STACK_OFFSET + 1];
+
+    // Base LMR reductions [quiet][depth][moveNumber] in 1/1024 ply, filled
+    // from the tunables at the start of each search.
+    static constexpr int LMR_TABLE_SIZE = 64;
+    int lmrTable_[2][LMR_TABLE_SIZE][LMR_TABLE_SIZE];
 
     ThreadData&   td_;        // persistent state (history tables)
     KillerTable   killers_;   // search-local
@@ -577,8 +592,11 @@ private:
     }
 
     // ---- Negamax alpha-beta (fail-soft) --------------------------------
+    // cutNode: a non-PV node expected to fail high (the first move of an
+    // expected cut node's parent, a reduced LMR probe, a null-move search's
+    // children alternate). Only used to reduce more in LMR.
     Value negamax(Position& pos, int depth, Value alpha, Value beta, int ply,
-                  bool pvNode, bool prevWasNull) {
+                  bool pvNode, bool cutNode, bool prevWasNull) {
         ++nodes_;
         if (ply > seldepth_) seldepth_ = ply;
         pvLength_[ply] = ply;
@@ -668,7 +686,7 @@ private:
             ss->contHist = &td_.contHist.sentinel();
             pos.do_null_move();
             const Value v = -negamax(pos, depth - 1 - R, -beta, -beta + 1, ply + 1,
-                                     /*pvNode=*/false, /*prevWasNull=*/true);
+                                     /*pvNode=*/false, !cutNode, /*prevWasNull=*/true);
             pos.undo_null_move();
 
             if (aborted_)
@@ -705,6 +723,8 @@ private:
         int        movesSearched = 0;
 
         // Moves searched so far that did not cut, for the history maluses.
+        const bool ttCapture = ttMove.is_ok() && !is_quiet_move(pos, ttMove);
+
         Move quietsTried[MoveList::CAPACITY];
         Move noisyTried[MoveList::CAPACITY];
         int  quietCount = 0;
@@ -716,7 +736,6 @@ private:
 
             // Pre-move classification (parent position).
             const bool isQuiet  = is_quiet_move(pos, m);
-            const bool isTtMove = ttMove.is_ok() && m == ttMove;
             const Move k1       = killers_.primary(ply);
             const Move k2       = killers_.secondary(ply);
             const bool isKiller = (m == k1 || m == k2);
@@ -740,6 +759,14 @@ private:
                     continue;   // SEE pruning: the capture loses too much
                 }
             }
+
+            // History of a quiet move (LMR adjustment). A noisy move is an LMR
+            // candidate when it is a losing capture or its capture history
+            // is negative.
+            const int  quietHist = isQuiet ? quiet_history(pos, m, ss) : 0;
+            const bool lmrNoisy  = !isQuiet
+                && (scores[i] < QS_BAD_CAPTURE_LIMIT
+                    || td_.captureHistory.get(moved, m.to_sq(), captured_index(pos, m)) < 0);
 
             // Futility: no quiet is expected to reach alpha. SEE: the quiet
             // move hangs material. Both spare checking moves (see below).
@@ -765,50 +792,51 @@ private:
 
             // Principal Variation Search + late move reductions. The first move
             // gets the full window; later moves get a null-window scout (a non-PV
-            // child). LMR inserts a reduced-depth probe before the full-depth
-            // scout when eligible; when R==0 the path is identical to pre-LMR PVS.
-            // A scout that lands strictly inside (alpha, beta) is re-searched at
+            // child), preceded by a reduced-depth probe when LMR applies. A
+            // reduced probe that beats alpha is re-searched at full depth; a
+            // scout that lands strictly inside (alpha, beta) is re-searched at
             // full depth with the full window (a PV child).
             Value score;
-            if (i == 0) {
+            if (movesSearched == 0) {
                 score = -negamax(pos, newDepth, -beta, -alpha, ply + 1, pvNode,
-                                 /*prevWasNull=*/false);
+                                 /*cutNode=*/!pvNode && !cutNode, /*prevWasNull=*/false);
             } else {
                 int R = 0;
                 if (depth >= t_.lmrMinDepth
-                    && i >= t_.lmrMinMoveIndex
-                    && isQuiet
-                    && !isTtMove
+                    && movesSearched >= t_.lmrMinMoveIndex
                     && !inCheck
-                    && !givesCheck) {
-                    R = t_.lmrBaseReduction;
-                    if (depth >= t_.lmrDepth6At) R += t_.lmrDepth6Extra;
-                    if (i >= t_.lmrDeepAt)       R += t_.lmrDeepExtra;
-                    if (pvNode)                  R = std::max(R - t_.lmrPvReduction, 0);
-                    if (isKiller)                R = std::max(R - t_.lmrKillerReduction, 0);
-                    // Clamp on the REDUCED depth only; the sole activation
-                    // threshold is `depth >= t_.lmrMinDepth` above. Never
-                    // reduce below depth 0: at newDepth == 1 (reachable only
-                    // with LmrMinDepth == 2) the probe may be a depth-0
-                    // quiescence search. At newDepth >= 2 keep the historical
-                    // probe floor of depth 1, so defaults are bit-identical.
-                    R = std::min(R, std::max(newDepth - 1, 1));
+                    && (isQuiet || lmrNoisy)) {
+                    const int d = std::min(depth, LMR_TABLE_SIZE - 1);
+                    const int n = std::min(movesSearched + 1, LMR_TABLE_SIZE - 1);
+                    // Fixed point: 1024 == one ply; Pct tunables are 1/100 ply.
+                    int r = lmrTable_[isQuiet][d][n];
+                    if (pvNode)     r -= t_.lmrPvPct * 1024 / 100;
+                    if (givesCheck) r -= t_.lmrCheckPct * 1024 / 100;
+                    if (isKiller)   r -= t_.lmrKillerPct * 1024 / 100;
+                    if (!improving) r += t_.lmrImprovingPct * 1024 / 100;
+                    if (ttCapture)  r += t_.lmrTtCapturePct * 1024 / 100;
+                    if (cutNode)    r += t_.lmrCutNodePct * 1024 / 100;
+                    if (isQuiet)    r -= quietHist * 1024 / t_.lmrHistoryDiv;
+                    // Round to plies; never extend, keep the probe at depth >= 1.
+                    R = r > 0 ? (r + 512) / 1024 : 0;
+                    R = std::min(R, newDepth - 1);
                 }
 
                 if (R > 0) {
                     score = -negamax(pos, newDepth - R, -alpha - 1, -alpha, ply + 1,
-                                     /*pvNode=*/false, /*prevWasNull=*/false);
+                                     /*pvNode=*/false, /*cutNode=*/true,
+                                     /*prevWasNull=*/false);
                     if (score > alpha)
                         score = -negamax(pos, newDepth, -alpha - 1, -alpha, ply + 1,
-                                         /*pvNode=*/false, /*prevWasNull=*/false);
+                                         /*pvNode=*/false, !cutNode, /*prevWasNull=*/false);
                 } else {
                     score = -negamax(pos, newDepth, -alpha - 1, -alpha, ply + 1,
-                                     /*pvNode=*/false, /*prevWasNull=*/false);
+                                     /*pvNode=*/false, !cutNode, /*prevWasNull=*/false);
                 }
 
-                if (score > alpha && score < beta)
-                    score = -negamax(pos, newDepth, -beta, -alpha, ply + 1, pvNode,
-                                     /*prevWasNull=*/false);
+                if (pvNode && score > alpha && score < beta)
+                    score = -negamax(pos, newDepth, -beta, -alpha, ply + 1, /*pvNode=*/true,
+                                     /*cutNode=*/false, /*prevWasNull=*/false);
             }
 
             pos.unmake_move(m);
@@ -975,6 +1003,15 @@ std::uint64_t Search::bench(int depth) {
     std::cout << "Nodes/second    : " << nps << std::endl;
 
     return totalNodes;
+}
+
+int Search::lmr_base_reduction(const Tunables& t, bool quiet, int depth, int moveNumber) {
+    if (depth < 1 || moveNumber < 1)
+        return 0;
+    const double base = (quiet ? t.lmrQuietBasePct : t.lmrNoisyBasePct) / 100.0;
+    const double div  = (quiet ? t.lmrQuietDivPct  : t.lmrNoisyDivPct)  / 100.0;
+    const double r    = base + std::log(depth) * std::log(moveNumber) / div;
+    return static_cast<int>(std::lround(r * 1024.0));
 }
 
 const Search::Tunables& Search::active_tunables() {

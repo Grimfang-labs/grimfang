@@ -182,8 +182,8 @@ cmd_setup() {
     cat <<EOF
 
 ${C_HDR}READY${C_OFF}  conc=$CONC nodes=$NODES hash=${HASH_MB}MB data=$DATA_DIR
-  podctl rung    v13 "LmrDeepExtra=0" "" 5
-  podctl measure v21 "LmrDeepExtra=0" "" 5000
+  podctl rung    v13 "LmrCutNodePct=0" "" 5
+  podctl measure v21 "LmrCutNodePct=0" "" 5000
   podctl save
 EOF
 }

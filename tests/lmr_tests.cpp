@@ -1,3 +1,4 @@
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -11,12 +12,14 @@
 #include "zobrist.hpp"
 
 // ===========================================================================
-// lmr_tests.cpp - Stage 3 rung 3.7 gate.
+// lmr_tests.cpp - late move reductions.
 //
-//   * Collapse guard: at depth 2 no node satisfies depth >= LMR_MIN_DEPTH (3),
-//     so the move loop must take the identical pre-LMR PVS path (R == 0).
-//     Reproducibility at depth 2 is the in-process check; byte-identical
-//     output vs the RFP baseline is verified by the handoff script.
+//   * Reduction table: R = base/100 + ln(depth) * ln(moveNumber) / (div/100)
+//     in 1/1024 ply, separately for quiet and noisy moves; checked against
+//     hand-computed values, monotonic in depth and move number, noisy moves
+//     reduced less than quiets at the defaults, and driven by the tunables.
+//   * Collapse guard: at depth 2 no node satisfies depth >= LmrMinDepth (3),
+//     so the search is reproducible with no reduction at all.
 //   * Mate regression is covered by the existing [mate] suite (run in ctest).
 // ===========================================================================
 
@@ -54,4 +57,50 @@ TEST_CASE("lmr: depth-2 search is reproducible (LMR inactive at depth < 3)", "[l
         REQUIRE(a.score    == b.score);
         REQUIRE(a.nodes     == b.nodes);
     }
+}
+
+TEST_CASE("lmr: base reduction table matches the log formula", "[lmr]") {
+    const Search::Tunables t;   // defaults: quiet 0.80 + ln*ln/2.40
+
+    // ln(1) == 0: only the constant term.
+    REQUIRE(Search::lmr_base_reduction(t, true, 1, 1) == 819);    // 0.80 ply
+    REQUIRE(Search::lmr_base_reduction(t, false, 1, 1) == 0);     // 0.00 ply
+
+    // depth 10, 20th move: 0.80 + ln(10) * ln(20) / 2.40 = 3.674 plies.
+    const double expected = (0.80 + std::log(10.0) * std::log(20.0) / 2.40) * 1024.0;
+    REQUIRE(std::abs(Search::lmr_base_reduction(t, true, 10, 20) - expected) <= 1.0);
+
+    // Degenerate inputs reduce nothing.
+    REQUIRE(Search::lmr_base_reduction(t, true, 0, 5) == 0);
+    REQUIRE(Search::lmr_base_reduction(t, true, 5, 0) == 0);
+}
+
+TEST_CASE("lmr: reductions grow with depth and move number", "[lmr]") {
+    const Search::Tunables t;
+    for (int quiet = 0; quiet < 2; ++quiet) {
+        for (int d = 1; d < 63; ++d) {
+            for (int n = 1; n < 63; ++n) {
+                const int r = Search::lmr_base_reduction(t, quiet == 1, d, n);
+                REQUIRE(Search::lmr_base_reduction(t, quiet == 1, d + 1, n) >= r);
+                REQUIRE(Search::lmr_base_reduction(t, quiet == 1, d, n + 1) >= r);
+                if (quiet == 0)
+                    REQUIRE(r <= Search::lmr_base_reduction(t, true, d, n));
+            }
+        }
+    }
+    // A typical late quiet at depth 8 is reduced by about 2-4 plies.
+    const int r = Search::lmr_base_reduction(t, true, 8, 12);
+    REQUIRE(r >= 2 * 1024);
+    REQUIRE(r <= 4 * 1024);
+}
+
+TEST_CASE("lmr: table follows the tunables", "[lmr]") {
+    Search::Tunables t;
+    const int def = Search::lmr_base_reduction(t, true, 12, 30);
+    t.lmrQuietDivPct = 480;   // halve the log term
+    const int halved = Search::lmr_base_reduction(t, true, 12, 30);
+    const double logTerm = std::log(12.0) * std::log(30.0) / 2.40 * 1024.0;
+    REQUIRE(std::abs((def - halved) - logTerm / 2.0) <= 2.0);
+    t.lmrQuietBasePct = 180;  // +1 ply constant
+    REQUIRE(Search::lmr_base_reduction(t, true, 12, 30) - halved == 1024);
 }
