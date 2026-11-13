@@ -167,3 +167,35 @@ TEST_CASE("history: Search::clear() resets the persistent state",
 
     Search::clear();
 }
+
+TEST_CASE("history: continuation and capture tables update with gravity", "[history]") {
+    static ContinuationHistory ch;   // ~1.2 MB: keep it off the stack
+    static CaptureHistory      cap;
+    ch.clear();
+    cap.clear();
+
+    // Piece indices are compact and distinct for all 12 pieces.
+    REQUIRE(history_piece_index(W_PAWN) == 0);
+    REQUIRE(history_piece_index(W_KING) == 5);
+    REQUIRE(history_piece_index(B_PAWN) == 6);
+    REQUIRE(history_piece_index(B_KING) == 11);
+
+    // A continuation entry: reply Nf6 (black knight to f6) after e4.
+    PieceToHistory& slice = ch.at(W_PAWN, E4);
+    for (int i = 0; i < 200; ++i)
+        HistoryTable::apply(slice[history_piece_index(B_KNIGHT)][F6], 1600);
+    const int v = slice[history_piece_index(B_KNIGHT)][F6];
+    REQUIRE(v > 0);
+    REQUIRE(v <= MAX_HISTORY);
+    // Other slices are untouched, and the sentinel slice stays zero.
+    REQUIRE(ch.at(W_PAWN, D4)[history_piece_index(B_KNIGHT)][F6] == 0);
+    REQUIRE(&ch.sentinel() == &ch.at(W_PAWN, A1));
+    REQUIRE(ch.sentinel()[history_piece_index(B_KNIGHT)][F6] == 0);
+
+    cap.update(W_KNIGHT, D5, KNIGHT, 400);
+    REQUIRE(cap.get(W_KNIGHT, D5, KNIGHT) == 400);
+    REQUIRE(cap.get(W_KNIGHT, D5, BISHOP) == 0);
+    cap.update(W_KNIGHT, D5, KNIGHT, -400);
+    REQUIRE(cap.get(W_KNIGHT, D5, KNIGHT) < 400);
+    REQUIRE(cap.get(W_PAWN, A8, CaptureHistory::NO_CAPTURE) == 0);
+}

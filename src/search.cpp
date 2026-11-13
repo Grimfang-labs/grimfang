@@ -21,14 +21,17 @@
 // search.cpp - negamax alpha-beta + quiescence + iterative deepening.
 //
 // Move ordering: the transposition-table move first, then captures that do
-// not lose material (static exchange evaluation >= 0) by MVV-LVA, then quiet
-// moves, then losing captures (SEE < 0). A shared transposition
-// table provides depth-preferred cutoffs at non-PV nodes and a best-move hint
-// everywhere. Mate scores are made node-relative on store / re-rooted on probe.
-// Quiet moves that cause a beta cutoff are remembered as killers (two per ply)
-// and ordered ahead of generic quiets; a butterfly history table (rewarded on
-// quiet cutoffs, penalised for quiets tried first, kept across the searches of
-// one game) orders the remaining quiets.
+// not lose material (static exchange evaluation >= 0) by MVV-LVA plus capture
+// history, then the two killers, then losing captures (SEE < 0), then the
+// remaining quiets by butterfly + 1/2-ply continuation history. A shared
+// transposition table provides depth-preferred cutoffs at non-PV nodes and a
+// best-move hint everywhere. Mate scores are made node-relative on store /
+// re-rooted on probe. A per-ply search stack records the move played at each
+// ply (and its continuation-history slice) with sentinels below the root.
+// On a beta cutoff the cutoff move is rewarded and the moves of the same kind
+// tried before it are penalised (history gravity); captures tried before
+// any cutoff move are penalised in capture history. All history tables are
+// kept across the searches of one game (ThreadData).
 // Quiescence skips captures that lose material by SEE.
 //
 // PV-node classification: a node is a PV node iff it is reached by always
@@ -49,10 +52,29 @@ constexpr int CAPTURE_BONUS     =  1'000'000;
 constexpr int PROMOTION_BONUS   =    900'000;
 constexpr int TT_MOVE_BONUS     = 10'000'000;   // root previous-best move
 // Losing captures (SEE < 0) are ordered after every quiet move: this base plus
-// any MVV-LVA term stays far below the lowest history score (-MAX_HISTORY).
-constexpr int BAD_CAPTURE_BONUS = -1'000'000;
-static_assert(BAD_CAPTURE_BONUS + 16 * 20000 < -MAX_HISTORY,
-              "bad captures must order below every quiet move");
+// any MVV-LVA / capture-history term stays far below the lowest quiet score
+// (butterfly + two continuation-history terms, each > -MAX_HISTORY).
+constexpr int BAD_CAPTURE_BONUS = 600'000;
+static_assert(BAD_CAPTURE_BONUS - 16 * 900 - MAX_HISTORY > 3 * MAX_HISTORY,
+              "bad captures must order above every quiet move");
+static_assert(BAD_CAPTURE_BONUS + 16 * 900 + MAX_HISTORY < KILLER2_BONUS,
+              "bad captures must order below the killers");
+// Quiescence stops at the first move scored below this (a losing capture).
+constexpr int QS_BAD_CAPTURE_LIMIT = BAD_CAPTURE_BONUS + 100'000;
+
+// Capture history is added to the MVV-LVA term scaled down by this divisor.
+constexpr int CAPTURE_HISTORY_DIV = 2;
+
+// Search stack: one entry per ply plus STACK_OFFSET sentinels below the root
+// so (ss - 1) and (ss - 2) are always valid.
+constexpr int STACK_OFFSET = 2;
+
+struct StackEntry {
+    Move            move       = MOVE_NONE;   // move played from this ply
+    Piece           moved      = NO_PIECE;    // piece that made it
+    Value           staticEval = VALUE_NONE;  // static eval at this ply (none in check)
+    PieceToHistory* contHist   = nullptr;     // continuation slice of `move`
+};
 
 // Poll the stop conditions roughly every this many nodes.
 constexpr std::uint64_t POLL_INTERVAL = 2048;
@@ -72,8 +94,8 @@ using Clock = std::chrono::steady_clock;
 
 // ---------------------------------------------------------------------------
 // Persistent per-thread search state. Everything a search learns that should
-// carry over to the next search of the same game lives here: today only the
-// butterfly history, later continuation / capture / correction history. It
+// carry over to the next search of the same game lives here: butterfly,
+// continuation and capture history (later correction history). It
 // survives between `go` commands and is reset by Search::clear() (ucinewgame,
 // bench, datagen game start). Search-local scratch (killers, PV table) stays
 // in Searcher.
@@ -83,9 +105,15 @@ using Clock = std::chrono::steady_clock;
 // resets them all.
 // ---------------------------------------------------------------------------
 struct ThreadData {
-    HistoryTable history;
+    HistoryTable        history;
+    ContinuationHistory contHist;
+    CaptureHistory      captureHistory;
 
-    void clear() { history.clear(); }
+    void clear() {
+        history.clear();
+        contHist.clear();
+        captureHistory.clear();
+    }
 };
 
 ThreadData g_mainThreadData;
@@ -121,6 +149,10 @@ public:
         // (reset by Search::clear()).
         TT.new_search();
         killers_.clear();
+        for (StackEntry& e : stack_) {
+            e = StackEntry{};
+            e.contHist = &td_.contHist.sentinel();
+        }
 
         // Time budget (no-op when only depth/nodes/infinite were given).
         const TimeBudget tb = compute_budget(limits, pos.side_to_move());
@@ -252,6 +284,8 @@ private:
     Move pvTable_[MAX_PLY][MAX_PLY];
     int  pvLength_[MAX_PLY] = { 0 };
 
+    StackEntry stack_[MAX_PLY + STACK_OFFSET + 1];
+
     ThreadData&   td_;        // persistent state (history tables)
     KillerTable   killers_;   // search-local
     HistoryTable& history_;   // == td_.history
@@ -275,7 +309,36 @@ private:
         return aborted_;
     }
 
-    int score_move(const Position& pos, Move m, Move ttMove, Move k1, Move k2) const {
+    // Captured piece type of a noisy move (CaptureHistory::NO_CAPTURE for a
+    // non-capturing promotion).
+    static int captured_index(const Position& pos, Move m) {
+        if (m.type_of() == EN_PASSANT)
+            return PAWN;
+        const Piece victim = pos.piece_on(m.to_sq());
+        return victim == NO_PIECE ? CaptureHistory::NO_CAPTURE : type_of(victim);
+    }
+
+    // Quiet-move history: butterfly plus the 1- and 2-ply continuation terms
+    // (ss == nullptr in quiescence: butterfly only).
+    int quiet_history(const Position& pos, Move m, const StackEntry* ss) const {
+        int h = history_.get(pos.side_to_move(), m);
+        if (ss) {
+            const int pi = history_piece_index(pos.piece_on(m.from_sq()));
+            const Square to = m.to_sq();
+            h += (*(ss - 1)->contHist)[pi][to] + (*(ss - 2)->contHist)[pi][to];
+        }
+        return h;
+    }
+
+    void update_continuation(const StackEntry* ss, Piece pc, Square to, int delta) {
+        const int pi = history_piece_index(pc);
+        for (int k = 1; k <= 2; ++k)
+            if ((ss - k)->move.is_ok())
+                HistoryTable::apply((*(ss - k)->contHist)[pi][to], delta);
+    }
+
+    int score_move(const Position& pos, Move m, Move ttMove, Move k1, Move k2,
+                   const StackEntry* ss) const {
         if (ttMove.is_ok() && m == ttMove)
             return TT_MOVE_BONUS;
 
@@ -285,18 +348,20 @@ private:
         const bool     isCapture = isEp || (pos.piece_on(to) != NO_PIECE);
 
         // Quiet move (no capture/promotion): killers first, then order the
-        // rest by history. History values (|.| < MAX_HISTORY) sit far below
-        // the killer band and far above the bad-capture band, so the total
-        // order is TT > good captures/promotions > K1 > K2 > history-sorted
-        // quiets > losing captures.
+        // rest by history. Quiet history sums (|.| < 3 * MAX_HISTORY) sit
+        // below the killer and bad-capture bands, so the total order is
+        // TT > good captures/promotions > K1 > K2 > losing captures >
+        // history-sorted quiets.
         if (!isCapture && mt != PROMOTION) {
             const int kb = killer_bonus(m, k1, k2);
             if (kb)
                 return kb;
-            return history_.get(pos.side_to_move(), m);
+            return quiet_history(pos, m, ss);
         }
 
-        int score = 0;
+        const Piece moved = pos.piece_on(m.from_sq());
+        int score = td_.captureHistory.get(moved, to, captured_index(pos, m))
+                  / CAPTURE_HISTORY_DIV;
         if (isCapture) {
             const PieceType victim   = isEp ? PAWN : type_of(pos.piece_on(to));
             const PieceType attacker = type_of(pos.piece_on(m.from_sq()));
@@ -304,8 +369,8 @@ private:
             // than the victim; otherwise skip the exchange evaluation.
             const bool good = orderValue[victim] >= orderValue[attacker]
                            || see_ge(pos, m, 0);
-            score = (good ? CAPTURE_BONUS : BAD_CAPTURE_BONUS)
-                  + orderValue[victim] * 16 - orderValue[attacker];
+            score += (good ? CAPTURE_BONUS : BAD_CAPTURE_BONUS)
+                   + orderValue[victim] * 16 - orderValue[attacker];
         }
         if (mt == PROMOTION)
             score += PROMOTION_BONUS + orderValue[m.promotion_type()];
@@ -317,9 +382,9 @@ private:
     // k1/k2 are this ply's killers (MOVE_NONE to disable, e.g. in quiescence).
     // On return scores[i] is the ordering score of list.moves[i].
     void order_moves(const Position& pos, MoveList& list, Move ttMove,
-                     Move k1, Move k2, int* scores) const {
+                     Move k1, Move k2, const StackEntry* ss, int* scores) const {
         for (int i = 0; i < list.count; ++i)
-            scores[i] = score_move(pos, list.moves[i], ttMove, k1, k2);
+            scores[i] = score_move(pos, list.moves[i], ttMove, k1, k2, ss);
 
         for (int i = 1; i < list.count; ++i) {
             const Move m  = list.moves[i];
@@ -427,7 +492,7 @@ private:
         else
             generate_captures(pos, list);
         int scores[MoveList::CAPACITY];
-        order_moves(pos, list, ttMove, MOVE_NONE, MOVE_NONE, scores);
+        order_moves(pos, list, ttMove, MOVE_NONE, MOVE_NONE, nullptr, scores);
 
         Move bestMove = MOVE_NONE;
 
@@ -435,9 +500,9 @@ private:
             const Move m = list.moves[i];
 
             if (!inCheck) {
-                // Losing captures (SEE < 0) carry a negative ordering score
-                // and are sorted last: stop at the first one.
-                if (scores[i] < 0)
+                // Losing captures (SEE < 0) are scored in the bad-capture
+                // band below every good capture: stop at the first one.
+                if (scores[i] < QS_BAD_CAPTURE_LIMIT)
                     break;
 
                 // Delta pruning: even winning the victim outright plus a
@@ -478,6 +543,37 @@ private:
         TT.store(key, bestMove, bestScore, staticEval, 0, bound, ply);
 
         return bestScore;
+    }
+
+    // ---- History updates on a beta cutoff ------------------------------
+    // A quiet cutoff move becomes a killer and gets a butterfly +
+    // continuation bonus; the quiets searched before it get the matching
+    // malus. A noisy cutoff move gets a capture-history bonus. Noisy moves
+    // searched before the cutoff move are penalised either way.
+    void update_histories(const Position& pos, const StackEntry* ss, int ply, int depth,
+                          Move best, bool bestIsQuiet,
+                          const Move* quiets, int quietCount,
+                          const Move* noisy, int noisyCount) {
+        const Color stm   = pos.side_to_move();
+        const int   bonus = history_bonus(depth, t_.historyBonusMultPct, t_.historyBonusCap);
+
+        if (bestIsQuiet) {
+            killers_.update(ply, best);
+            history_.update(stm, best, bonus);
+            update_continuation(ss, pos.piece_on(best.from_sq()), best.to_sq(), bonus);
+            for (int j = 0; j < quietCount; ++j) {
+                history_.update(stm, quiets[j], -bonus);
+                update_continuation(ss, pos.piece_on(quiets[j].from_sq()),
+                                    quiets[j].to_sq(), -bonus);
+            }
+        } else {
+            td_.captureHistory.update(pos.piece_on(best.from_sq()), best.to_sq(),
+                                      captured_index(pos, best), bonus);
+        }
+
+        for (int j = 0; j < noisyCount; ++j)
+            td_.captureHistory.update(pos.piece_on(noisy[j].from_sq()), noisy[j].to_sq(),
+                                      captured_index(pos, noisy[j]), -bonus);
     }
 
     // ---- Negamax alpha-beta (fail-soft) --------------------------------
@@ -525,6 +621,8 @@ private:
         const Value staticEval = inCheck            ? VALUE_NONE
                                : ttEval != VALUE_NONE ? ttEval
                                                       : Eval::evaluate(pos);
+        StackEntry* const ss = &stack_[ply + STACK_OFFSET];
+        ss->staticEval = staticEval;
 
         // ---- Reverse futility pruning (static null move) ---------------
         // Cheapest pruner: no search at all. If the static eval is so far above
@@ -554,6 +652,9 @@ private:
             && pos.has_non_pawn_material(pos.side_to_move())
             && staticEval >= beta) {
             const int R = t_.nmpBase + depth / t_.nmpDepthDiv;
+            ss->move     = MOVE_NONE;
+            ss->moved    = NO_PIECE;
+            ss->contHist = &td_.contHist.sentinel();
             pos.do_null_move();
             const Value v = -negamax(pos, depth - 1 - R, -beta, -beta + 1, ply + 1,
                                      /*pvNode=*/false, /*prevWasNull=*/true);
@@ -575,10 +676,16 @@ private:
 
         int scores[MoveList::CAPACITY];
         order_moves(pos, list, ttMove, killers_.primary(ply), killers_.secondary(ply),
-                    scores);
+                    ss, scores);
 
         Value bestScore = -VALUE_INFINITE;
         Move  bestMove  = MOVE_NONE;
+
+        // Moves searched so far that did not cut, for the history maluses.
+        Move quietsTried[MoveList::CAPACITY];
+        Move noisyTried[MoveList::CAPACITY];
+        int  quietCount = 0;
+        int  noisyCount = 0;
 
         for (int i = 0; i < list.count; ++i) {
             const Move m = list.moves[i];
@@ -590,6 +697,11 @@ private:
             const Move k1       = killers_.primary(ply);
             const Move k2       = killers_.secondary(ply);
             const bool isKiller = (m == k1 || m == k2);
+            const Piece moved   = pos.piece_on(m.from_sq());
+
+            ss->move     = m;
+            ss->moved    = moved;
+            ss->contHist = &td_.contHist.at(moved, m.to_sq());
 
             pos.make_move(m);
             const bool givesCheck = pos.checkers() != 0;
@@ -659,26 +771,18 @@ private:
                     pvLength_[ply] = pvLength_[ply + 1];
 
                     if (score >= beta) {
-                        // Remember a quiet refutation for sibling nodes at this
-                        // ply, and update history: reward the cutoff move,
-                        // penalise the quiets tried before it (history gravity).
-                        // Captures/promotions already order well via MVV-LVA and
-                        // are left untouched.
-                        if (is_quiet_move(pos, m)) {
-                            killers_.update(ply, m);
-
-                            const Color stm   = pos.side_to_move();
-                            const int   bonus = history_bonus(
-                                depth, t_.historyBonusMultPct, t_.historyBonusCap);
-                            history_.update(stm, m, bonus);
-                            for (int j = 0; j < i; ++j)
-                                if (is_quiet_move(pos, list.moves[j]))
-                                    history_.update(stm, list.moves[j], -bonus);
-                        }
+                        update_histories(pos, ss, ply, depth, m, isQuiet,
+                                         quietsTried, quietCount,
+                                         noisyTried, noisyCount);
                         break;                     // fail-high cutoff
                     }
                 }
             }
+
+            if (isQuiet)
+                quietsTried[quietCount++] = m;
+            else
+                noisyTried[noisyCount++] = m;
         }
 
         // ---- Single store at node exit ---------------------------------

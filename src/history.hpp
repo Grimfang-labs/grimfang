@@ -57,3 +57,56 @@ struct HistoryTable {
         return table[c][m.from_sq()][m.to_sq()];
     }
 };
+
+// ---------------------------------------------------------------------------
+// Compact piece index for history tables: white P..K -> 0..5, black -> 6..11.
+// ---------------------------------------------------------------------------
+constexpr int HISTORY_PIECE_NB = 12;
+
+inline int history_piece_index(Piece pc) {
+    return static_cast<int>(color_of(pc)) * 6 + static_cast<int>(type_of(pc));
+}
+
+// ---------------------------------------------------------------------------
+// Continuation history: how well a quiet move (piece, to) did as a reply to
+// an earlier move (piece', to') played one or two plies before. The outer
+// [piece'][to'] index selects a PieceToHistory slice; the search stack keeps
+// a pointer to the slice of the move played at each ply, so the lookup for
+// the current move is one indexed load per continuation ply.
+// ---------------------------------------------------------------------------
+using PieceToHistory = std::int16_t[HISTORY_PIECE_NB][SQ_NB];
+
+struct ContinuationHistory {
+    PieceToHistory table[HISTORY_PIECE_NB][SQ_NB];
+
+    void clear() { std::memset(table, 0, sizeof(table)); }
+
+    PieceToHistory& at(Piece pc, Square to) {
+        return table[history_piece_index(pc)][to];
+    }
+
+    // Slice used for plies whose move has no continuation (null move, plies
+    // below the root). A white pawn can never move to a1, so no real move
+    // maps here; updates skip such plies, so it stays all zero.
+    PieceToHistory& sentinel() { return table[0][A1]; }
+};
+
+// ---------------------------------------------------------------------------
+// Capture history: [moved piece][to][captured piece type]. Slot NO_CAPTURE is
+// used by non-capturing promotions.
+// ---------------------------------------------------------------------------
+struct CaptureHistory {
+    static constexpr int NO_CAPTURE = PIECE_TYPE_NB;   // 6
+
+    std::int16_t table[HISTORY_PIECE_NB][SQ_NB][PIECE_TYPE_NB + 1];
+
+    void clear() { std::memset(table, 0, sizeof(table)); }
+
+    void update(Piece pc, Square to, int captured, int delta) {
+        HistoryTable::apply(table[history_piece_index(pc)][to][captured], delta);
+    }
+
+    int get(Piece pc, Square to, int captured) const {
+        return table[history_piece_index(pc)][to][captured];
+    }
+};
