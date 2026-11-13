@@ -66,6 +66,12 @@ struct Tunables {
     // Reverse futility pruning (static null move).
     int rfpMaxDepth         = 8;     // deepest ply RFP may fire
     int rfpMargin           = 100;   // centipawns of margin per ply of remaining depth
+                                     // (depth - 1 plies when improving)
+
+    // Late move pruning: at non-PV depth <= lmpMaxDepth, skip the remaining
+    // quiets once (lmpBase + depth^2) / (2 - improving) moves were searched.
+    int lmpMaxDepth         = 8;
+    int lmpBase             = 3;
 
     // Late move reductions.
     int lmrMinDepth         = 3;     // node depth at/above which LMR may reduce

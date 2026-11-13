@@ -66,8 +66,8 @@ constexpr int QS_BAD_CAPTURE_LIMIT = BAD_CAPTURE_BONUS + 100'000;
 constexpr int CAPTURE_HISTORY_DIV = 2;
 
 // Search stack: one entry per ply plus STACK_OFFSET sentinels below the root
-// so (ss - 1) and (ss - 2) are always valid.
-constexpr int STACK_OFFSET = 2;
+// so (ss - 1) .. (ss - 4) are always valid.
+constexpr int STACK_OFFSET = 4;
 
 struct StackEntry {
     Move            move       = MOVE_NONE;   // move played from this ply
@@ -624,6 +624,17 @@ private:
         StackEntry* const ss = &stack_[ply + STACK_OFFSET];
         ss->staticEval = staticEval;
 
+        // "Improving": the static eval is higher than at our previous turn
+        // (two plies up; four if we were in check then). In check there is no
+        // eval and nothing is improving; with no earlier eval at all (both
+        // ancestors in check, or near the root) assume improving, which is
+        // the conservative choice for the pruning margins below.
+        const bool improving =
+              inCheck                             ? false
+            : (ss - 2)->staticEval != VALUE_NONE ? staticEval > (ss - 2)->staticEval
+            : (ss - 4)->staticEval != VALUE_NONE ? staticEval > (ss - 4)->staticEval
+                                                 : true;
+
         // ---- Reverse futility pruning (static null move) ---------------
         // Cheapest pruner: no search at all. If the static eval is so far above
         // beta that even a generous per-ply margin can't drag it back, assume a
@@ -635,7 +646,7 @@ private:
             && ply > 0
             && depth <= t_.rfpMaxDepth
             && std::abs(beta) < VALUE_MATE_IN_MAX_PLY
-            && staticEval - t_.rfpMargin * depth >= beta) {
+            && staticEval - t_.rfpMargin * (depth - improving) >= beta) {
             return staticEval;
         }
 
@@ -681,6 +692,13 @@ private:
         Value bestScore = -VALUE_INFINITE;
         Move  bestMove  = MOVE_NONE;
 
+        // Late move pruning: at shallow non-PV nodes, once this many moves
+        // have been searched, the remaining quiets are skipped.
+        const bool lmpNode  = !pvNode && !inCheck && depth <= t_.lmpMaxDepth;
+        const int  lmpLimit = (t_.lmpBase + depth * depth) / (2 - improving);
+        bool       skipQuiets = false;
+        int        movesSearched = 0;
+
         // Moves searched so far that did not cut, for the history maluses.
         Move quietsTried[MoveList::CAPACITY];
         Move noisyTried[MoveList::CAPACITY];
@@ -698,6 +716,19 @@ private:
             const Move k2       = killers_.secondary(ply);
             const bool isKiller = (m == k1 || m == k2);
             const Piece moved   = pos.piece_on(m.from_sq());
+
+            // ---- Shallow-depth pruning (non-PV, not in check) ----------
+            // Only once some move has produced a non-losing score, so the
+            // first move is always searched and a mated node is never
+            // mis-scored by skipping its only defences.
+            if (isQuiet && lmpNode && bestScore > -VALUE_MATE_IN_MAX_PLY) {
+                if (skipQuiets)
+                    continue;
+                if (movesSearched >= lmpLimit) {
+                    skipQuiets = true;
+                    continue;
+                }
+            }
 
             ss->move     = m;
             ss->moved    = moved;
@@ -755,6 +786,7 @@ private:
             }
 
             pos.unmake_move(m);
+            ++movesSearched;
 
             if (aborted_)
                 return alpha;
