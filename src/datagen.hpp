@@ -51,6 +51,7 @@ struct DatagenOptions {
     int           resignScore  = 1500;
     int           resignPlies  = 4;
     int           progress     = 0;   // every N completed games; 0 = off
+    int           hashMb       = 16;  // transposition table size (MB)
 };
 
 // Encode/decode helpers (testable without running a full game).

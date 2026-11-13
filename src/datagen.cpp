@@ -15,6 +15,7 @@
 #include "movegen.hpp"
 #include "position.hpp"
 #include "search.hpp"
+#include "tt.hpp"
 
 // ===========================================================================
 // datagen.cpp - self-play data generation implementation.
@@ -214,9 +215,10 @@ bool play_one_game(Position& pos, Rng64& rng, const DatagenOptions& opts,
                    std::uint64_t& positions) {
     pos = Position::startpos();
     buffer.clear();
-    // Persistent search state (history) starts fresh every game so each game
-    // depends only on the seed, not on earlier games.
+    // Persistent search state (history, transposition table) starts fresh
+    // every game so each game depends only on the seed, not on earlier games.
     Search::clear();
+    TT.clear();
 
     if (!play_random_opening(pos, rng, opts.randomPlies))
         return false;
@@ -375,6 +377,7 @@ DatagenOptions parse_datagen_args(int argc, char** argv) {
         else if (arg == "--resign-score")  opts.resignScore = std::stoi(needValue("--resign-score"));
         else if (arg == "--resign-plies")  opts.resignPlies = std::stoi(needValue("--resign-plies"));
         else if (arg == "--progress")      opts.progress    = std::stoi(needValue("--progress"));
+        else if (arg == "--hash")          opts.hashMb      = std::stoi(needValue("--hash"));
         else
             throw std::runtime_error("unknown datagen flag: " + arg);
     }
@@ -391,6 +394,8 @@ DatagenOptions parse_datagen_args(int argc, char** argv) {
         throw std::runtime_error("--resign-plies must be positive");
     if (opts.progress < 0)
         throw std::runtime_error("--progress must be >= 0");
+    if (opts.hashMb < 1 || opts.hashMb > 1024)
+        throw std::runtime_error("--hash must be in [1, 1024] MB");
     return opts;
 }
 
@@ -401,6 +406,10 @@ std::uint64_t run_datagen(const DatagenOptions& opts) {
     std::FILE* out = std::fopen(opts.outPath.c_str(), "wb");
     if (!out)
         throw std::runtime_error("cannot open output file: " + opts.outPath);
+
+    // The searches need a real transposition table: the datagen entry point
+    // bypasses the UCI loop, which is where the table is normally sized.
+    TT.resize(static_cast<std::size_t>(opts.hashMb));
 
     Position                      pos;
     Rng64                         rng(opts.seed);

@@ -1,5 +1,7 @@
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -99,4 +101,37 @@ TEST_CASE("datagen: node limit stops near the requested cap", "[datagen][nodes]"
 
 TEST_CASE("datagen: sizeof record matches on-disk contract", "[datagen]") {
     REQUIRE(sizeof(DatagenRecord) == 74);
+}
+
+TEST_CASE("datagen: --hash parses and is validated", "[datagen]") {
+    const char* ok[] = { "grimfang", "datagen", "--hash", "8" };
+    REQUIRE(parse_datagen_args(4, const_cast<char**>(ok)).hashMb == 8);
+    REQUIRE(parse_datagen_args(2, const_cast<char**>(ok)).hashMb == 16);
+
+    const char* bad[] = { "grimfang", "datagen", "--hash", "0" };
+    REQUIRE_THROWS(parse_datagen_args(4, const_cast<char**>(bad)));
+}
+
+TEST_CASE("datagen: same seed gives byte-identical output", "[datagen]") {
+    // The table is sized by run_datagen and cleared per game, so a run must
+    // not depend on what an earlier run (or test) left in it.
+    const std::string base =
+        (std::filesystem::temp_directory_path() / "grimfang_dg_det").string();
+    DatagenOptions opts;
+    opts.games   = 3;
+    opts.nodeCap = 2000;
+    opts.seed    = 7;
+
+    std::vector<std::vector<char>> outputs;
+    for (int run = 0; run < 2; ++run) {
+        opts.outPath = base + std::to_string(run) + ".bin";
+        REQUIRE(run_datagen(opts) > 0);
+        std::ifstream in(opts.outPath, std::ios::binary);
+        outputs.emplace_back(std::istreambuf_iterator<char>(in),
+                             std::istreambuf_iterator<char>());
+        in.close();
+        std::filesystem::remove(opts.outPath);
+    }
+    REQUIRE(!outputs[0].empty());
+    REQUIRE(outputs[0] == outputs[1]);
 }
