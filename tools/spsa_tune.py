@@ -133,6 +133,8 @@ PARAMS: dict[str, dict[str, float]] = {
     "LmrQuietBasePct":     {"start":  80, "min": -100, "max": 300, "c_end": 15},
     "LmrQuietDivPct":      {"start": 240, "min": 100, "max": 500, "c_end": 20},
     "HistoryBonusMultPct": {"start": 100, "min":  50, "max": 200, "c_end":  8},
+    "SeMinDepth":          {"start":   7, "min":   4, "max":  14, "c_end":  1},
+    "SeBetaMargin":        {"start":  16, "min":   0, "max":  64, "c_end":  3},
 }
 
 NAMES = list(PARAMS.keys())

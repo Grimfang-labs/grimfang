@@ -80,6 +80,7 @@ struct StackEntry {
     Piece           moved      = NO_PIECE;    // piece that made it
     Value           staticEval = VALUE_NONE;  // static eval at this ply (none in check)
     PieceToHistory* contHist   = nullptr;     // continuation slice of `move`
+    Move            excluded   = MOVE_NONE;   // singular-extension search: skip this move
 };
 
 // Poll the stop conditions roughly every this many nodes.
@@ -218,6 +219,7 @@ public:
 
             Value score = 0;
             while (true) {
+                rootDepth_ = depth;
                 score = negamax(pos, depth, alpha, beta, 0,
                                 /*pvNode=*/true, /*cutNode=*/false, /*prevWasNull=*/false);
                 if (aborted_)
@@ -279,6 +281,7 @@ private:
     std::uint64_t      nodes_      = 0;
     std::uint64_t      limitNodes_ = 0;
     int                seldepth_   = 0;
+    int                rootDepth_  = 1;      // depth of the current iteration
     bool               aborted_    = false;
 
     // Per-search snapshot of the live tunables (see iterate()).
@@ -787,9 +790,14 @@ private:
         const int   ttDepth = ttHit ? tte->depth() : -1;
         const Bound ttBound = ttHit ? tte->bound() : BOUND_NONE;
 
+        // Singular-extension verification search of this node (same ply,
+        // same position, the TT move excluded): no TT cutoff, no null move
+        // or reverse futility, no TT store.
+        const Move excluded = stack_[ply + STACK_OFFSET].excluded;
+
         // A sufficiently deep entry can cut, but only at a non-PV, non-root
         // node so the principal variation is always searched in full.
-        if (ttHit && !pvNode && ply > 0 && ttDepth >= depth) {
+        if (ttHit && !pvNode && ply > 0 && ttDepth >= depth && !excluded.is_ok()) {
             if (ttBound == BOUND_EXACT
                 || (ttBound == BOUND_LOWER && ttValue >= beta)
                 || (ttBound == BOUND_UPPER && ttValue <= alpha))
@@ -824,6 +832,7 @@ private:
         if (!pvNode
             && !inCheck
             && ply > 0
+            && !excluded.is_ok()
             && depth <= t_.rfpMaxDepth
             && std::abs(beta) < VALUE_MATE_IN_MAX_PLY
             && staticEval - t_.rfpMargin * (depth - improving) >= beta) {
@@ -840,6 +849,7 @@ private:
             && ply > 0
             && depth >= 3
             && !prevWasNull
+            && !excluded.is_ok()
             && pos.has_non_pawn_material(pos.side_to_move())
             && staticEval >= beta) {
             // Reduce more the further the static eval is above beta.
@@ -896,7 +906,9 @@ private:
         int  noisyCount = 0;
 
         for (Move m; (m = mp.next(moveScore)).is_ok(); ) {
-            const int  newDepth = depth - 1;
+            if (m == excluded)
+                continue;
+            int newDepth = depth - 1;
 
             // Pre-move classification (parent position).
             const bool isQuiet  = is_quiet_move(pos, m);
@@ -946,6 +958,40 @@ private:
             // Futility / SEE pruning of a quiet move, unless it gives check.
             if (quietPrunable && !givesCheck)
                 continue;
+
+            // ---- Singular extension ------------------------------------
+            // The TT move holds a deep lower bound. Search every other move
+            // at reduced depth against a window just below the TT score: if
+            // all fail low, the TT move is singular and gets one more ply.
+            // If even the alternatives reach a margin above beta, several
+            // moves refute this node (multi-cut): return. If only the TT
+            // score is above beta, the TT move is searched one ply less.
+            // Extensions are allowed while ply < 2 * root depth.
+            if (ply > 0
+                && m == ttMove
+                && !excluded.is_ok()
+                && depth >= t_.seMinDepth
+                && ttDepth >= depth - t_.seTtDepthMargin
+                && (ttBound & BOUND_LOWER)
+                && std::abs(ttValue) < VALUE_MATE_IN_MAX_PLY
+                && ply < 2 * rootDepth_) {
+                const Value singularBeta  = ttValue - t_.seBetaMargin * depth / 8;
+                const int   singularDepth = (depth - 1) / 2;
+                ss->excluded = m;
+                const Value v = negamax(pos, singularDepth, singularBeta - 1, singularBeta,
+                                        ply, /*pvNode=*/false, cutNode, /*prevWasNull=*/false);
+                ss->excluded = MOVE_NONE;
+                pvLength_[ply] = ply;   // the verification search wrote this ply
+                if (aborted_)
+                    return alpha;
+
+                if (v < singularBeta)
+                    newDepth += 1;
+                else if (singularBeta >= beta)
+                    return singularBeta;
+                else if (ttValue >= beta)
+                    newDepth -= 1;
+            }
 
             ss->move     = m;
             ss->moved    = moved;
@@ -1035,6 +1081,10 @@ private:
                 noisyTried[noisyCount++] = m;
         }
 
+        // Verification search with no move besides the excluded one.
+        if (excluded.is_ok() && bestScore == -VALUE_INFINITE)
+            return alpha;
+
         // No legal move: checkmate or stalemate.
         if (mp.yielded() == 0)
             return inCheck ? static_cast<Value>(-(VALUE_MATE - ply))
@@ -1044,7 +1094,8 @@ private:
         const Bound bound = (bestScore >= beta)     ? BOUND_LOWER
                           : (bestScore > alphaOrig) ? BOUND_EXACT
                                                     : BOUND_UPPER;
-        TT.store(key, bestMove, bestScore, staticEval, depth, bound, ply);
+        if (!excluded.is_ok())
+            TT.store(key, bestMove, bestScore, staticEval, depth, bound, ply);
 
         return bestScore;
     }

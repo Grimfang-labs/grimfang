@@ -66,6 +66,10 @@ const SpinOption kSpinOptions[] = {
     { "RfpMargin",           &Search::Tunables::rfpMargin,           50,   200  },
     // Internal iterative reduction (no TT move, depth >= IirMinDepth).
     { "IirMinDepth",         &Search::Tunables::iirMinDepth,         2,    12   },
+    // Singular extensions: singularBeta = ttValue - SeBetaMargin * depth / 8.
+    { "SeMinDepth",          &Search::Tunables::seMinDepth,          4,    14   },
+    { "SeTtDepthMargin",     &Search::Tunables::seTtDepthMargin,     1,    6    },
+    { "SeBetaMargin",        &Search::Tunables::seBetaMargin,        0,    64   },
     // Late move pruning: limit = (LmpBase + depth^2) / (2 - improving).
     { "LmpMaxDepth",         &Search::Tunables::lmpMaxDepth,         0,    16   },
     { "LmpBase",             &Search::Tunables::lmpBase,             0,    12   },

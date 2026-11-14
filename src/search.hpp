@@ -75,6 +75,14 @@ struct Tunables {
     // there is no TT move.
     int iirMinDepth         = 4;
 
+    // Singular extensions: at depth >= seMinDepth, a TT move whose
+    // lower-bound entry has depth >= depth - seTtDepthMargin is verified by
+    // searching the other moves at depth (depth - 1) / 2 against
+    // singularBeta = ttValue - seBetaMargin * depth / 8.
+    int seMinDepth          = 7;
+    int seTtDepthMargin     = 3;
+    int seBetaMargin        = 16;    // cp per 8 plies of depth (2 cp/ply)
+
     // Late move pruning: at non-PV depth <= lmpMaxDepth, skip the remaining
     // quiets once (lmpBase + depth^2) / (2 - improving) moves were searched.
     int lmpMaxDepth         = 8;
