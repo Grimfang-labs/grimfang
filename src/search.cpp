@@ -196,17 +196,15 @@ public:
 
             // Aspiration: from depth 4 onward, search a narrow window around the
             // previous iteration's score. Fail-high / fail-low widen (by the
-            // factor t_.aspirationWidenPct/100, ~1.5x at default) from the
+            // factor t_.aspirationWidenPct/100, 2x at default) from the
             // fail-soft score and re-search the same depth. Depths < 4 and
             // near-mate prev scores keep the full window. Widening is monotonic
             // and capped at ±VALUE_INFINITE.
             //
-            // Initial δ (t_.aspirationDelta, default 120, not classic 20): against
-            // this NNUE, shallow ID scores routinely swing outside ±20, and
-            // gradual widening from 20 thrashed (bench +20% nodes). δ=120 still
-            // tightens vs ±INF and drops nodes at bench depths 6/8/10 vs the
-            // full-window baseline. Both δ and the widen factor are hand-picked
-            // workaround values, never tuned -- hence exposed as options.
+            // Initial δ (t_.aspirationDelta, default 25) and widen factor
+            // (default 200%) were picked by fixed-node matches against the
+            // old hand-picked 120 / 150% (δ 15 and 40 tested no better);
+            // both remain exposed as options for tuning.
             Value alpha = -VALUE_INFINITE;
             Value beta  = VALUE_INFINITE;
             Value delta = t_.aspirationDelta;

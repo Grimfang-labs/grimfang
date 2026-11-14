@@ -56,8 +56,8 @@ struct Result {
 // ---------------------------------------------------------------------------
 struct Tunables {
     // Aspiration windows (ID driver).
-    int aspirationDelta     = 120;   // initial +/- window half-width (cp)
-    int aspirationWidenPct  = 150;   // widen factor on fail-high/low: delta = delta * pct / 100
+    int aspirationDelta     = 25;    // initial +/- window half-width (cp)
+    int aspirationWidenPct  = 200;   // widen factor on fail-high/low: delta = delta * pct / 100
 
     // Null-move pruning: R = nmpBase + depth / nmpDepthDiv
     //                      + min((staticEval - beta) / nmpEvalDiv, nmpEvalMax).

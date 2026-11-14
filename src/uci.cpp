@@ -52,8 +52,8 @@ struct SpinOption {
 };
 
 const SpinOption kSpinOptions[] = {
-    // Aspiration windows (hand-picked workaround values, never tuned).
-    { "AspirationDelta",     &Search::Tunables::aspirationDelta,     20,   400  },
+    // Aspiration windows (picked by fixed-node matches, not SPSA-tuned).
+    { "AspirationDelta",     &Search::Tunables::aspirationDelta,     5,    400  },
     { "AspirationWidenPct",  &Search::Tunables::aspirationWidenPct,  101,  300  },
     // Null-move pruning: R = NmpBase + depth / NmpDepthDiv
     //                      + min((eval - beta) / NmpEvalDiv, NmpEvalMax).

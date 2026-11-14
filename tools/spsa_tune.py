@@ -124,8 +124,8 @@ R_END = 0.015
 # --------------------------------------------------------------------------
 
 PARAMS: dict[str, dict[str, float]] = {
-    "AspirationDelta":     {"start": 120, "min":  20, "max": 400, "c_end": 19},
-    "AspirationWidenPct":  {"start": 150, "min": 101, "max": 300, "c_end": 10},
+    "AspirationDelta":     {"start":  25, "min":   5, "max": 400, "c_end":  5},
+    "AspirationWidenPct":  {"start": 200, "min": 101, "max": 300, "c_end": 10},
     "RfpMargin":           {"start": 100, "min":  50, "max": 200, "c_end":  8},
     "RfpMaxDepth":         {"start":   8, "min":   4, "max":  16, "c_end":  2},
     "LmrMinDepth":         {"start":   3, "min":   2, "max":   6, "c_end":  1},
