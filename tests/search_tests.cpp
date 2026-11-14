@@ -133,7 +133,10 @@ TEST_CASE("search: mate in 2", "[search][mate]") {
     Position pos;
     pos.set_fen("7k/8/5K2/8/8/8/8/5R2 w - - 0 1");
 
-    const Search::Result r = Search::search_fixed(pos, 6);
+    // With lazily scored moves (quiets ordered by the history as it stands
+    // when they are reached) the quiet 1.Kg6 is reduced more often and the
+    // mate is proven at depth 7 (it was 5); depth 8 leaves a ply of slack.
+    const Search::Result r = Search::search_fixed(pos, 8);
     REQUIRE(mate_in(r.score) == 2);
 }
 
@@ -163,7 +166,7 @@ TEST_CASE("aspiration: terminates and matches full-window on mates; sharp FENs l
         int         mateMoves;
     } mates[] = {
         { "7k/Q7/6K1/8/8/8/8/8 w - - 0 1", 5, 1 },
-        { "7k/8/5K2/8/8/8/8/5R2 w - - 0 1", 6, 2 },
+        { "7k/8/5K2/8/8/8/8/5R2 w - - 0 1", 8, 2 },
     };
 
     for (const auto& c : mates) {
@@ -184,13 +187,15 @@ TEST_CASE("aspiration: terminates and matches full-window on mates; sharp FENs l
 
     // Sharp tactical FENs: loop must terminate with a legal bestmove, and must
     // not thrash (aspirated node count should not greatly exceed full-window).
+    // Depth 8: at depth 6 the trees are only ~1-3k nodes, where a single
+    // re-search or ordering change dominates the comparison.
     const struct SharpCase {
         const char* fen;
         int         depth;
     } sharp[] = {
-        { "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 6 },
-        { "r1bqk2r/ppp2ppp/2n2n2/2bpp3/4P3/2NP1N2/PPP2PPP/R1BQKB1R w KQkq - 0 5", 6 },
-        { "8/pp3p1k/2p2q1p/3r1P2/5R2/7P/P1P1QP2/7K b - - 2 30", 6 },
+        { "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 8 },
+        { "r1bqk2r/ppp2ppp/2n2n2/2bpp3/4P3/2NP1N2/PPP2PPP/R1BQKB1R w KQkq - 0 5", 8 },
+        { "8/pp3p1k/2p2q1p/3r1P2/5R2/7P/P1P1QP2/7K b - - 2 30", 8 },
     };
 
     for (const auto& c : sharp) {
