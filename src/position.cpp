@@ -432,6 +432,59 @@ Bitboard Position::checkers() const {
     return attackers_to(ksq, pieces()) & pieces(~sideToMove_);
 }
 
+bool Position::gives_check(Move m) const {
+    const Color    us   = sideToMove_;
+    const Color    them = ~us;
+    const Square   from = m.from_sq();
+    const Square   to   = m.to_sq();
+    const MoveType mt   = m.type_of();
+    const Square   ksq  = king_sq(them);
+    const Bitboard kbb  = square_bb(ksq);
+
+    // Occupancy after the move (the captured piece on `to`, if any, is
+    // replaced by ours, so `to` is simply occupied).
+    Bitboard occ = (pieces() ^ square_bb(from)) | square_bb(to);
+    // Our sliders that could give a discovered check (the moving piece is
+    // handled as a direct check from `to`).
+    Bitboard ourDiag = pieces(us, BISHOP, QUEEN) & ~square_bb(from);
+    Bitboard ourOrth = pieces(us, ROOK, QUEEN) & ~square_bb(from);
+
+    PieceType pt = type_of(board_[from]);
+    if (mt == PROMOTION) {
+        pt = m.promotion_type();
+    } else if (mt == EN_PASSANT) {
+        occ ^= square_bb(to - pawn_push(us));
+    } else if (mt == CASTLING) {
+        const bool   kingSide = to > from;
+        const Square rookFrom = kingSide ? static_cast<Square>(to + 1)
+                                         : static_cast<Square>(to - 2);
+        const Square rookTo   = kingSide ? static_cast<Square>(to - 1)
+                                         : static_cast<Square>(to + 1);
+        occ = (occ ^ square_bb(rookFrom)) | square_bb(rookTo);
+        ourOrth = (ourOrth & ~square_bb(rookFrom)) | square_bb(rookTo);
+    }
+
+    // ---- Direct check by the piece standing on `to` ---------------------
+    switch (pt) {
+        case PAWN:   if (pawn_attacks(us, to) & kbb)     return true; break;
+        case KNIGHT: if (knight_attacks(to) & kbb)       return true; break;
+        case BISHOP: if (bishop_attacks(to, occ) & kbb)  return true; break;
+        case ROOK:   if (rook_attacks(to, occ) & kbb)    return true; break;
+        case QUEEN:  if (queen_attacks(to, occ) & kbb)   return true; break;
+        default: break;   // a king never checks directly
+    }
+
+    // ---- Discovered check ------------------------------------------------
+    // Only a vacated square on a line through the enemy king can uncover a
+    // slider (the from-square, the en passant victim, the castling rook).
+    if (mt == NORMAL || mt == PROMOTION) {
+        if (!line_bb(ksq, from))
+            return false;
+    }
+    return (bishop_attacks(ksq, occ) & ourDiag)
+        || (rook_attacks(ksq, occ) & ourOrth);
+}
+
 Bitboard Position::pinned(Color c) const {
     const Square   ksq = king_sq(c);
     const Bitboard occ = pieces();

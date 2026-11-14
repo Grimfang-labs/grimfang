@@ -1,3 +1,5 @@
+#include <cstdint>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -6,6 +8,7 @@
 #include "attacks.hpp"
 #include "bitboard.hpp"
 #include "move.hpp"
+#include "movegen.hpp"
 #include "perft.hpp"
 #include "position.hpp"
 #include "zobrist.hpp"
@@ -190,4 +193,65 @@ TEST_CASE("perft deep", "[perft][slow]") {
     REQUIRE(perft_of("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 7) == 178633661);
     REQUIRE(perft_of("r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 6)
             == 706045033);
+}
+
+// ---------------------------------------------------------------------------
+// Position::gives_check must agree with make_move + checkers() for every
+// legal move of every position in a perft-style tree walk (covers direct,
+// discovered, en passant, castling and promotion checks).
+// ---------------------------------------------------------------------------
+namespace {
+
+std::uint64_t check_gives_check(Position& pos, int depth, std::uint64_t& checks) {
+    MoveList list;
+    generate_legal(pos, list);
+    std::uint64_t n = 0;
+    for (const Move m : list) {
+        const bool predicted = pos.gives_check(m);
+        pos.make_move(m);
+        const bool actual = pos.checkers() != 0;
+        if (predicted != actual) {
+            pos.unmake_move(m);
+            FAIL("gives_check mismatch: " << pos.fen() << " move " << to_uci(m)
+                 << " predicted " << predicted << " actual " << actual);
+        }
+        checks += actual;
+        ++n;
+        if (depth > 1)
+            n += check_gives_check(pos, depth - 1, checks);
+        pos.unmake_move(m);
+    }
+    return n;
+}
+
+} // namespace
+
+TEST_CASE("gives_check matches make_move + checkers", "[movegen][givescheck]") {
+    const std::vector<std::pair<std::string, int>> cases = {
+        { "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 4 },
+        { "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 3 },
+        { "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 5 },
+        { "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 3 },
+        { "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8", 3 },
+        { "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10", 3 },
+        // Castling with check by the rook (white O-O-O gives check on d-file).
+        { "3k4/8/8/8/8/8/8/R3K2R w KQ - 0 1", 3 },
+        { "5k2/8/8/8/8/8/8/R3K2R w KQ - 0 1", 3 },
+        // En passant discovered checks (rank and diagonal) and ep direct check.
+        { "8/8/8/K2Pp2k/8/8/8/8 w - e6 0 1", 4 },
+        { "8/8/8/1k1Pp2R/8/8/8/4K3 w - e6 0 1", 3 },
+        { "8/8/3k4/4pP2/8/8/8/B3K3 w - e6 0 1", 3 },
+        // Promotions with direct and discovered checks.
+        { "3k4/1P6/8/8/8/8/6p1/4K2R b K - 0 1", 3 },
+        { "1k6/3P4/8/8/8/8/3R4/4K3 w - - 0 1", 3 },
+        { "r3k3/1P6/8/8/8/8/8/R3K3 w Qq - 0 1", 3 },
+    };
+    std::uint64_t total = 0, checks = 0;
+    for (const auto& [fen, depth] : cases) {
+        Position pos;
+        pos.set_fen(fen);
+        total += check_gives_check(pos, depth, checks);
+    }
+    REQUIRE(total > 100000);
+    REQUIRE(checks > 1000);
 }

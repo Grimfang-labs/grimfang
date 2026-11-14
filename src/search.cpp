@@ -785,19 +785,17 @@ private:
                     || (depth <= t_.seePruneMaxDepth
                         && !see_ge(pos, m, -t_.seeQuietMargin * depth)));
 
+            const bool givesCheck = pos.gives_check(m);
+
+            // Futility / SEE pruning of a quiet move, unless it gives check.
+            if (quietPrunable && !givesCheck)
+                continue;
+
             ss->move     = m;
             ss->moved    = moved;
             ss->contHist = &td_.contHist.at(moved, m.to_sq());
 
             pos.make_move(m);
-            const bool givesCheck = pos.checkers() != 0;
-
-            // Futility / SEE pruning of a quiet move, unless it gives check
-            // (only known once the move is made).
-            if (quietPrunable && !givesCheck) {
-                pos.unmake_move(m);
-                continue;
-            }
 
             // Principal Variation Search + late move reductions. The first move
             // gets the full window; later moves get a null-window scout (a non-PV

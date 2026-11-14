@@ -103,6 +103,13 @@ public:
     // Enemy pieces giving check to the side-to-move's king.
     Bitboard checkers() const;
 
+    // Would the (legal) move `m` give check? Exact for every move type:
+    // direct checks by the moved / promoted piece, discovered checks by
+    // sliders behind the from-square (or the en passant victim's square),
+    // and the castling rook. Computed from attack tables without making the
+    // move.
+    bool gives_check(Move m) const;
+
     // Own pieces of color `c` absolutely pinned to their king.
     Bitboard pinned(Color c) const;
 
