@@ -4,6 +4,10 @@
 #include <cstdint>
 #include <vector>
 
+#if defined(_MSC_VER)
+#include <xmmintrin.h>
+#endif
+
 #include "move.hpp"
 #include "score.hpp"
 #include "types.hpp"
@@ -67,6 +71,20 @@ public:
     // Find a matching entry in the cluster. Returns true and yields the entry
     // when a stored entry verifies against `key`; otherwise returns false.
     bool probe(Key key, TTEntry*& out);
+
+    // Hint the CPU to start loading the cluster of `key` (no effect on
+    // results). Called right after make_move so the child's probe hits cache.
+    void prefetch(Key key) const {
+        if (clusterCount_ == 0)
+            return;
+        const Cluster* c =
+            &table_[static_cast<std::size_t>(static_cast<std::uint32_t>(key)) & mask_];
+#if defined(_MSC_VER)
+        _mm_prefetch(reinterpret_cast<const char*>(c), _MM_HINT_T0);
+#else
+        __builtin_prefetch(c);
+#endif
+    }
 
     // Write an entry with the replacement scheme, applying value_to_tt(v, ply).
     void store(Key key, Move m, Value v, Value eval, int depth, Bound b, int ply);

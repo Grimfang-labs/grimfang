@@ -698,6 +698,7 @@ private:
             }
 
             pos.make_move(m);
+            TT.prefetch(pos.key());
             const Value score = -quiescence(pos, -beta, -alpha, ply + 1, pvNode);
             pos.unmake_move(m);
 
@@ -850,6 +851,7 @@ private:
             ss->moved    = NO_PIECE;
             ss->contHist = &td_.contHist.sentinel();
             pos.do_null_move();
+            TT.prefetch(pos.key());
             const Value v = -negamax(pos, depth - 1 - R, -beta, -beta + 1, ply + 1,
                                      /*pvNode=*/false, !cutNode, /*prevWasNull=*/true);
             pos.undo_null_move();
@@ -952,6 +954,7 @@ private:
             ss->contHist = &td_.contHist.at(moved, m.to_sq());
 
             pos.make_move(m);
+            TT.prefetch(pos.key());
 
             // Principal Variation Search + late move reductions. The first move
             // gets the full window; later moves get a null-window scout (a non-PV

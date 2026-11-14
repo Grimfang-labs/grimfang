@@ -29,6 +29,7 @@ struct StateInfo {
     int            rule50;
     Piece          captured;
     Key            key;
+    Bitboard       checkers;
 };
 
 class Position {
@@ -100,8 +101,9 @@ public:
     // Is `s` attacked by any piece of color `by`, given occupancy `occ`?
     bool is_square_attacked(Square s, Color by, Bitboard occ) const;
 
-    // Enemy pieces giving check to the side-to-move's king.
-    Bitboard checkers() const;
+    // Enemy pieces giving check to the side-to-move's king (cached: computed
+    // once by set_fen / make_move, restored by unmake_move).
+    Bitboard checkers() const { return checkers_; }
 
     // Would the (legal) move `m` give check? Exact for every move type:
     // direct checks by the moved / promoted piece, discovered checks by
@@ -146,6 +148,10 @@ private:
     int            rule50_;
     int            fullMove_;
     Key            key_;
+    Bitboard       checkers_;
+
+    // Recompute checkers_ from the board.
+    Bitboard compute_checkers() const;
 
     std::vector<StateInfo> states_;
 

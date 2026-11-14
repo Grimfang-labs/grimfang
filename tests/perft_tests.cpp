@@ -210,6 +210,10 @@ std::uint64_t check_gives_check(Position& pos, int depth, std::uint64_t& checks)
         const bool predicted = pos.gives_check(m);
         pos.make_move(m);
         const bool actual = pos.checkers() != 0;
+        // The cached checkers must equal a recomputation.
+        const Color stm = pos.side_to_move();
+        REQUIRE(pos.checkers()
+                == (pos.attackers_to(pos.king_sq(stm)) & pos.pieces(~stm)));
         if (predicted != actual) {
             pos.unmake_move(m);
             FAIL("gives_check mismatch: " << pos.fen() << " move " << to_uci(m)

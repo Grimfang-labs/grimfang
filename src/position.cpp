@@ -91,6 +91,7 @@ void Position::clear() {
     rule50_     = 0;
     fullMove_   = 1;
     key_        = 0;
+    checkers_   = 0;
     states_.clear();
     nnue_.clear();
     keyHistory_.clear();
@@ -155,6 +156,8 @@ void Position::set_fen(const std::string& fen) {
     if (sideToMove_ == BLACK) key_ ^= Zobrist::side;
     key_ ^= Zobrist::castling[castling_];
     if (ep_capturable(ep_, sideToMove_)) key_ ^= Zobrist::enpassant[file_of(ep_)];
+
+    checkers_ = compute_checkers();
 
     // Seed the repetition history with the root position.
     nnue_.reset(*this);
@@ -230,6 +233,7 @@ void Position::make_move(Move m) {
     st.rule50   = rule50_;
     st.key      = key_;          // exact pre-move key for restore
     st.captured = NO_PIECE;
+    st.checkers = checkers_;
 
     // Record the feature changes only; the accumulators are computed lazily
     // when an eval needs them (see nnue::AccumulatorStack).
@@ -308,6 +312,8 @@ void Position::make_move(Move m) {
     key_ ^= Zobrist::side;
     if (us == BLACK) ++fullMove_;
 
+    checkers_ = compute_checkers();
+
     states_.push_back(st);
     keyHistory_.push_back(key_);
 
@@ -358,6 +364,7 @@ void Position::unmake_move(Move m) {
     ep_       = st.ep;
     rule50_   = st.rule50;
     key_      = st.key;
+    checkers_ = st.checkers;
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +379,7 @@ void Position::do_null_move() {
     st.rule50   = rule50_;
     st.key      = key_;
     st.captured = NO_PIECE;
+    st.checkers = checkers_;
 
     // Drop any ep component from the key (the side to move is the one that
     // could have captured), then clear the square: en passant is only legal on
@@ -386,6 +394,9 @@ void Position::do_null_move() {
     nnue_.push_null();   // no feature changes: shares the parent's accumulators
     sideToMove_ = ~sideToMove_;
     key_ ^= Zobrist::side;
+    // The side that passed was not in check, so the opponent's king cannot
+    // be attacked either (that position would have been illegal).
+    checkers_ = 0;
 
     states_.push_back(st);
     keyHistory_.push_back(key_);
@@ -404,6 +415,7 @@ void Position::undo_null_move() {
     ep_         = st.ep;
     rule50_     = st.rule50;
     key_        = st.key;
+    checkers_   = st.checkers;
 }
 
 // ---------------------------------------------------------------------------
@@ -427,7 +439,7 @@ bool Position::is_square_attacked(Square s, Color by, Bitboard occ) const {
     return false;
 }
 
-Bitboard Position::checkers() const {
+Bitboard Position::compute_checkers() const {
     const Square ksq = king_sq(sideToMove_);
     return attackers_to(ksq, pieces()) & pieces(~sideToMove_);
 }
