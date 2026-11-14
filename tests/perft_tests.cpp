@@ -255,3 +255,53 @@ TEST_CASE("gives_check matches make_move + checkers", "[movegen][givescheck]") {
     REQUIRE(total > 100000);
     REQUIRE(checks > 1000);
 }
+
+// ---------------------------------------------------------------------------
+// Position::is_legal(Move) must accept exactly the moves generate_legal
+// produces: every 16-bit move value is tried at every node of short tree
+// walks (TT moves can be arbitrary values from another position).
+// ---------------------------------------------------------------------------
+namespace {
+
+void check_is_legal(Position& pos, int depth, std::uint64_t& nodes) {
+    MoveList list;
+    generate_legal(pos, list);
+    std::vector<bool> isGen(65536, false);
+    for (const Move m : list)
+        isGen[m.raw()] = true;
+    for (int raw = 0; raw < 65536; ++raw) {
+        const Move m(static_cast<std::uint16_t>(raw));
+        if (pos.is_legal(m) != isGen[raw])
+            FAIL("is_legal mismatch: " << pos.fen() << " move " << to_uci(m)
+                 << " raw " << raw << " generated " << isGen[raw]);
+    }
+    ++nodes;
+    if (depth > 1)
+        for (const Move m : list) {
+            pos.make_move(m);
+            check_is_legal(pos, depth - 1, nodes);
+            pos.unmake_move(m);
+        }
+}
+
+} // namespace
+
+TEST_CASE("is_legal matches generate_legal for every move value", "[movegen][islegal]") {
+    const std::vector<std::pair<std::string, int>> cases = {
+        { "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 3 },
+        { "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 4 },
+        { "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 2 },
+        { "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8", 2 },
+        { "8/8/8/1k1Pp2R/8/8/8/4K3 w - e6 0 1", 2 },
+        { "8/8/3k4/4pP2/8/8/8/B3K3 w - e6 0 1", 2 },
+        { "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1", 2 },
+        { "4k3/8/8/8/1b6/8/8/R3K2R w KQ - 0 1", 2 },
+    };
+    std::uint64_t nodes = 0;
+    for (const auto& [fen, depth] : cases) {
+        Position pos;
+        pos.set_fen(fen);
+        check_is_legal(pos, depth, nodes);
+    }
+    REQUIRE(nodes > 2000);
+}

@@ -110,6 +110,11 @@ public:
     // move.
     bool gives_check(Move m) const;
 
+    // Is `m` (any 16-bit value, e.g. a transposition-table move that may
+    // belong to another position) a legal move here? Exactly equivalent to
+    // membership in generate_legal's output, without generating moves.
+    bool is_legal(Move m) const;
+
     // Own pieces of color `c` absolutely pinned to their king.
     Bitboard pinned(Color c) const;
 

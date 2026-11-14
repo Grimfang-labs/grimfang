@@ -485,6 +485,102 @@ bool Position::gives_check(Move m) const {
         || (rook_attacks(ksq, occ) & ourOrth);
 }
 
+bool Position::is_legal(Move m) const {
+    if (!m.is_ok())
+        return false;
+
+    const Color    us   = sideToMove_;
+    const Color    them = ~us;
+    const Square   from = m.from_sq();
+    const Square   to   = m.to_sq();
+    const MoveType mt   = m.type_of();
+    const Piece    pc   = board_[from];
+
+    if (pc == NO_PIECE || color_of(pc) != us || (pieces(us) & square_bb(to)))
+        return false;
+    // Generated non-promotions carry zero promotion bits.
+    if (mt != PROMOTION && (m.raw() & 0x3000))
+        return false;
+
+    const PieceType pt  = type_of(pc);
+    const Square    ksq = king_sq(us);
+    const Bitboard  occ = pieces();
+    const Bitboard  chk = checkers();
+
+    if (mt == CASTLING) {
+        if (pt != KING || chk)
+            return false;
+        const Square home = (us == WHITE) ? E1 : E8;
+        if (from != home)
+            return false;
+        Square s1, s2;   // transit squares: must be empty and not attacked
+        if (to == home + 2) {
+            if (!can_castle(us == WHITE ? WHITE_OO : BLACK_OO))
+                return false;
+            s1 = static_cast<Square>(home + 1);
+            s2 = static_cast<Square>(home + 2);
+        } else if (to == home - 2) {
+            if (!can_castle(us == WHITE ? WHITE_OOO : BLACK_OOO)
+                || !empty(static_cast<Square>(home - 3)))
+                return false;
+            s1 = static_cast<Square>(home - 1);
+            s2 = static_cast<Square>(home - 2);
+        } else {
+            return false;
+        }
+        return empty(s1) && empty(s2)
+            && !is_square_attacked(s1, them, occ)
+            && !is_square_attacked(s2, them, occ);
+    }
+
+    if (mt == EN_PASSANT) {
+        if (pt != PAWN || to != ep_ || !(pawn_attacks(us, from) & square_bb(to)))
+            return false;
+        // Same full simulation as the generator: both pawns leave, ours lands.
+        const Square   capSq    = to - pawn_push(us);
+        const Bitboard occAfter = (occ ^ square_bb(from) ^ square_bb(capSq)) | square_bb(to);
+        return !(rook_attacks(ksq, occAfter)   & pieces(them, ROOK, QUEEN))
+            && !(bishop_attacks(ksq, occAfter) & pieces(them, BISHOP, QUEEN))
+            && !(knight_attacks(ksq)           & pieces(them, KNIGHT))
+            && !(pawn_attacks(us, ksq)         & (pieces(them, PAWN) ^ square_bb(capSq)));
+    }
+
+    if (pt == PAWN) {
+        if ((mt == PROMOTION) != (relative_rank(us, to) == RANK_8))
+            return false;
+        const Direction up = pawn_push(us);
+        const bool ok =
+               (pawn_attacks(us, from) & pieces(them) & square_bb(to))
+            || (to == from + up && empty(to))
+            || (to == from + 2 * up && relative_rank(us, from) == RANK_2
+                && empty(static_cast<Square>(from + up)) && empty(to));
+        if (!ok)
+            return false;
+    } else {
+        if (mt == PROMOTION || !(attacks_bb(pt, from, occ) & square_bb(to)))
+            return false;
+    }
+
+    // King: the destination must not be attacked with the king lifted off
+    // its square (a slider checking along the ray still covers it).
+    if (pt == KING)
+        return !is_square_attacked(to, them, occ ^ square_bb(from));
+
+    // In check: capture the (single) checker or block a slider check.
+    if (chk) {
+        if (more_than_one(chk)
+            || !((chk | between_bb(ksq, lsb(chk))) & square_bb(to)))
+            return false;
+    }
+
+    // Pins: no enemy slider (other than one captured on `to`) may see the
+    // king once the piece has moved.
+    const Bitboard occAfter = (occ ^ square_bb(from)) | square_bb(to);
+    const Bitboard enemy    = pieces(them) & ~square_bb(to);
+    return !(bishop_attacks(ksq, occAfter) & enemy & pieces(BISHOP, QUEEN))
+        && !(rook_attacks(ksq, occAfter)   & enemy & pieces(ROOK, QUEEN));
+}
+
 Bitboard Position::pinned(Color c) const {
     const Square   ksq = king_sq(c);
     const Bitboard occ = pieces();

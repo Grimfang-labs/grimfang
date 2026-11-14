@@ -352,27 +352,16 @@ private:
                 HistoryTable::apply((*(ss - k)->contHist)[pi][to], delta);
     }
 
-    int score_move(const Position& pos, Move m, Move ttMove, Move k1, Move k2,
-                   const StackEntry* ss) const {
-        if (ttMove.is_ok() && m == ttMove)
-            return TT_MOVE_BONUS;
-
+    // Ordering score of a noisy move (capture, en passant or promotion):
+    // MVV-LVA plus capture history, in the good band (above the killers)
+    // unless it is a capture that loses material by SEE (bad band, between
+    // the killers and the quiets). Quiet moves are ordered by killers then
+    // quiet_history(); the TT move comes first (see MovePicker).
+    int score_noisy(const Position& pos, Move m) const {
         const MoveType mt   = m.type_of();
         const Square   to   = m.to_sq();
         const bool     isEp = (mt == EN_PASSANT);
         const bool     isCapture = isEp || (pos.piece_on(to) != NO_PIECE);
-
-        // Quiet move (no capture/promotion): killers first, then order the
-        // rest by history. Quiet history sums (|.| < 3 * MAX_HISTORY) sit
-        // below the killer and bad-capture bands, so the total order is
-        // TT > good captures/promotions > K1 > K2 > losing captures >
-        // history-sorted quiets.
-        if (!isCapture && mt != PROMOTION) {
-            const int kb = killer_bonus(m, k1, k2);
-            if (kb)
-                return kb;
-            return quiet_history(pos, m, ss);
-        }
 
         const Piece moved = pos.piece_on(m.from_sq());
         int score = td_.captureHistory.get(moved, to, captured_index(pos, m))
@@ -393,27 +382,209 @@ private:
         return score;
     }
 
-    // Stable insertion sort, descending by score (ties keep generation order).
-    // k1/k2 are this ply's killers (MOVE_NONE to disable, e.g. in quiescence).
-    // On return scores[i] is the ordering score of list.moves[i].
-    void order_moves(const Position& pos, MoveList& list, Move ttMove,
-                     Move k1, Move k2, const StackEntry* ss, int* scores) const {
-        for (int i = 0; i < list.count; ++i)
-            scores[i] = score_move(pos, list.moves[i], ttMove, k1, k2, ss);
-
-        for (int i = 1; i < list.count; ++i) {
-            const Move m  = list.moves[i];
-            const int  sc = scores[i];
-            int j = i - 1;
-            while (j >= 0 && scores[j] < sc) {
-                list.moves[j + 1] = list.moves[j];
-                scores[j + 1]     = scores[j];
-                --j;
-            }
-            list.moves[j + 1] = m;
-            scores[j + 1]     = sc;
+    // ---- Staged move picker ----------------------------------------------
+    // Yields the moves of a node one at a time in exactly the order a stable
+    // descending sort by score_move() would give, but lazily:
+    //   1. the TT move, validated with Position::is_legal, before any
+    //      generation (a node that cuts on it never generates moves);
+    //   2. noisy moves scoring above the killers (good captures, promotions),
+    //   3. killer 1, killer 2 (only when they are legal quiets here),
+    //   4. losing captures,
+    //   5. the remaining quiets, scored by history only when reached.
+    // Each band is picked by selection (first maximum, shifting the rest so
+    // ties keep generation order) instead of being fully sorted.
+    // Quiescence (qsearch, not in check) yields the TT move only when it is
+    // noisy and stops after the good noisy moves; in check it yields every
+    // evasion with quiets ordered by butterfly history alone (ss == nullptr).
+    class MovePicker {
+    public:
+        MovePicker(const Searcher& s, const Position& pos, Move ttMove, Move k1, Move k2,
+                   const StackEntry* ss, bool qsNoisyOnly)
+            : s_(s), pos_(pos), tt_(ttMove), k1_(k1), k2_(k2), ss_(ss),
+              qsNoisyOnly_(qsNoisyOnly) {
+            if (!(tt_.is_ok() && pos_.is_legal(tt_)
+                  && (!qsNoisyOnly_ || !is_quiet_move(pos_, tt_))))
+                tt_ = MOVE_NONE;
         }
-    }
+
+        // Stop yielding quiet moves (killers included) from now on.
+        void skip_quiets() { skipQuiets_ = true; }
+
+        // Number of moves yielded so far (0 at the end: no legal move).
+        int yielded() const { return yielded_; }
+
+        // Next move, or MOVE_NONE when exhausted. `score` receives the
+        // move's ordering score (as score_move() would give it).
+        Move next(int& score) {
+            while (true) {
+                switch (stage_) {
+                case Stage::TT:
+                    stage_ = Stage::GENERATE;
+                    if (tt_.is_ok()) {
+                        score = TT_MOVE_BONUS;
+                        ++yielded_;
+                        return tt_;
+                    }
+                    break;
+
+                case Stage::GENERATE:
+                    generate();
+                    stage_ = Stage::GOOD_NOISY;
+                    break;
+
+                case Stage::GOOD_NOISY:
+                    if (goodCur_ < goodEnd_) {
+                        ++yielded_;
+                        return pick(goodCur_++, goodEnd_, score);
+                    }
+                    stage_ = qsNoisyOnly_ ? Stage::DONE : Stage::KILLER1;
+                    break;
+
+                case Stage::KILLER1:
+                    stage_ = Stage::KILLER2;
+                    if (haveK1_ && !skipQuiets_) {
+                        score = KILLER1_BONUS;
+                        ++yielded_;
+                        return k1_;
+                    }
+                    break;
+
+                case Stage::KILLER2:
+                    stage_ = Stage::BAD_NOISY;
+                    if (haveK2_ && !skipQuiets_) {
+                        score = KILLER2_BONUS;
+                        ++yielded_;
+                        return k2_;
+                    }
+                    break;
+
+                case Stage::BAD_NOISY:
+                    if (badCur_ < badEnd_) {
+                        ++yielded_;
+                        return pick(badCur_++, badEnd_, score);
+                    }
+                    stage_ = Stage::SCORE_QUIETS;
+                    break;
+
+                case Stage::SCORE_QUIETS:
+                    if (skipQuiets_) {
+                        stage_ = Stage::DONE;
+                        break;
+                    }
+                    for (int i = quietCur_; i < quietEnd_; ++i)
+                        scores_[i] = s_.quiet_history(pos_, moves_[i], ss_);
+                    stage_ = Stage::QUIETS;
+                    break;
+
+                case Stage::QUIETS:
+                    if (quietCur_ < quietEnd_ && !skipQuiets_) {
+                        ++yielded_;
+                        return pick(quietCur_++, quietEnd_, score);
+                    }
+                    stage_ = Stage::DONE;
+                    break;
+
+                case Stage::DONE:
+                    return MOVE_NONE;
+                }
+            }
+        }
+
+    private:
+        enum class Stage { TT, GENERATE, GOOD_NOISY, KILLER1, KILLER2, BAD_NOISY,
+                           SCORE_QUIETS, QUIETS, DONE };
+
+        // Generate, drop the TT move, and split into three bands kept in
+        // generation order: good noisy [0, goodEnd_), bad noisy
+        // [badCur_, badEnd_) and quiets [quietCur_, quietEnd_), all in one
+        // buffer (good from the front, quiets from the back; the bad noisy
+        // moves go to a side buffer then follow the good ones).
+        void generate() {
+            MoveList list;
+            if (qsNoisyOnly_)
+                generate_captures(pos_, list);
+            else
+                generate_legal(pos_, list);
+
+            Move bad[MoveList::CAPACITY];
+            int  badScores[MoveList::CAPACITY];
+            int  nGood = 0, nBad = 0, nQuiet = 0;
+            Move quiets[MoveList::CAPACITY];
+
+            for (int i = 0; i < list.count; ++i) {
+                const Move m = list.moves[i];
+                if (m == tt_)
+                    continue;
+                if (is_quiet_move(pos_, m)) {
+                    if (m == k1_ && k1_.is_ok())      haveK1_ = true;
+                    else if (m == k2_ && k2_.is_ok()) haveK2_ = true;
+                    else                              quiets[nQuiet++] = m;
+                    continue;
+                }
+                const int sc = s_.score_noisy(pos_, m);
+                if (sc > KILLER1_BONUS) {
+                    moves_[nGood]  = m;
+                    scores_[nGood] = sc;
+                    ++nGood;
+                } else {
+                    bad[nBad]       = m;
+                    badScores[nBad] = sc;
+                    ++nBad;
+                }
+            }
+
+            goodCur_ = 0;
+            goodEnd_ = nGood;
+            badCur_  = nGood;
+            for (int i = 0; i < nBad; ++i) {
+                moves_[nGood + i]  = bad[i];
+                scores_[nGood + i] = badScores[i];
+            }
+            badEnd_   = nGood + nBad;
+            quietCur_ = badEnd_;
+            for (int i = 0; i < nQuiet; ++i)
+                moves_[quietCur_ + i] = quiets[i];
+            quietEnd_ = quietCur_ + nQuiet;
+        }
+
+        // Move the first highest-scoring move of [cur, end) to `cur`,
+        // shifting the moves before it up by one (stable), and return it.
+        Move pick(int cur, int end, int& score) {
+            int best = cur;
+            for (int i = cur + 1; i < end; ++i)
+                if (scores_[i] > scores_[best])
+                    best = i;
+            const Move m  = moves_[best];
+            const int  sc = scores_[best];
+            for (int i = best; i > cur; --i) {
+                moves_[i]  = moves_[i - 1];
+                scores_[i] = scores_[i - 1];
+            }
+            moves_[cur]  = m;
+            scores_[cur] = sc;
+            score = sc;
+            return m;
+        }
+
+        const Searcher&   s_;
+        const Position&   pos_;
+        Move              tt_;
+        const Move        k1_, k2_;
+        const StackEntry* ss_;
+        const bool        qsNoisyOnly_;
+
+        Stage stage_      = Stage::TT;
+        bool  skipQuiets_ = false;
+        bool  haveK1_     = false;
+        bool  haveK2_     = false;
+        int   yielded_    = 0;
+        int   goodCur_ = 0, goodEnd_ = 0;
+        int   badCur_ = 0, badEnd_ = 0;
+        int   quietCur_ = 0, quietEnd_ = 0;
+
+        Move moves_[MoveList::CAPACITY];
+        int  scores_[MoveList::CAPACITY];
+    };
 
     void print_info(int depth, Value score, const Position& /*pos*/) const {
         const std::int64_t ms  = elapsed_ms();
@@ -501,25 +672,17 @@ private:
                 alpha = bestScore;
         }
 
-        MoveList list;
-        if (inCheck)
-            generate_legal(pos, list);
-        else
-            generate_captures(pos, list);
-        int scores[MoveList::CAPACITY];
-        order_moves(pos, list, ttMove, MOVE_NONE, MOVE_NONE, nullptr, scores);
+        // Not in check: the TT move (if noisy) and the captures /
+        // promotions that do not lose material by SEE; losing captures are
+        // never searched. In check: every evasion.
+        MovePicker mp(*this, pos, ttMove, MOVE_NONE, MOVE_NONE, nullptr,
+                      /*qsNoisyOnly=*/!inCheck);
 
         Move bestMove = MOVE_NONE;
+        int  moveScore = 0;
 
-        for (int i = 0; i < list.count; ++i) {
-            const Move m = list.moves[i];
-
+        for (Move m; (m = mp.next(moveScore)).is_ok(); ) {
             if (!inCheck) {
-                // Losing captures (SEE < 0) are scored in the bad-capture
-                // band below every good capture: stop at the first one.
-                if (scores[i] < QS_BAD_CAPTURE_LIMIT)
-                    break;
-
                 // Delta pruning: even winning the victim outright plus a
                 // margin cannot reach alpha. Promotions are never pruned.
                 if (m.type_of() != PROMOTION) {
@@ -705,16 +868,9 @@ private:
         if (depth >= t_.iirMinDepth && !ttMove.is_ok())
             --depth;
 
-        MoveList list;
-        generate_legal(pos, list);
-
-        if (list.count == 0)
-            return inCheck ? static_cast<Value>(-(VALUE_MATE - ply))
-                           : VALUE_DRAW;
-
-        int scores[MoveList::CAPACITY];
-        order_moves(pos, list, ttMove, killers_.primary(ply), killers_.secondary(ply),
-                    ss, scores);
+        MovePicker mp(*this, pos, ttMove, killers_.primary(ply), killers_.secondary(ply),
+                      ss, /*qsNoisyOnly=*/false);
+        int moveScore = 0;
 
         Value bestScore = -VALUE_INFINITE;
         Move  bestMove  = MOVE_NONE;
@@ -739,8 +895,7 @@ private:
         int  quietCount = 0;
         int  noisyCount = 0;
 
-        for (int i = 0; i < list.count; ++i) {
-            const Move m = list.moves[i];
+        for (Move m; (m = mp.next(moveScore)).is_ok(); ) {
             const int  newDepth = depth - 1;
 
             // Pre-move classification (parent position).
@@ -761,6 +916,7 @@ private:
                     // Late move pruning: every remaining quiet is skipped.
                     if (depth <= t_.lmpMaxDepth && movesSearched >= lmpLimit) {
                         skipQuiets = true;
+                        mp.skip_quiets();
                         continue;
                     }
                 } else if (depth <= t_.seePruneMaxDepth
@@ -774,7 +930,7 @@ private:
             // is negative.
             const int  quietHist = isQuiet ? quiet_history(pos, m, ss) : 0;
             const bool lmrNoisy  = !isQuiet
-                && (scores[i] < QS_BAD_CAPTURE_LIMIT
+                && (moveScore < QS_BAD_CAPTURE_LIMIT
                     || td_.captureHistory.get(moved, m.to_sq(), captured_index(pos, m)) < 0);
 
             // Futility: no quiet is expected to reach alpha. SEE: the quiet
@@ -877,6 +1033,11 @@ private:
             else
                 noisyTried[noisyCount++] = m;
         }
+
+        // No legal move: checkmate or stalemate.
+        if (mp.yielded() == 0)
+            return inCheck ? static_cast<Value>(-(VALUE_MATE - ply))
+                           : VALUE_DRAW;
 
         // ---- Single store at node exit ---------------------------------
         const Bound bound = (bestScore >= beta)     ? BOUND_LOWER
